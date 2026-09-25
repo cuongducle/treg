@@ -51,6 +51,8 @@ def test_every_provider_is_registered():
         "scrapecreators",
         "dataforseo", "seranking", "moz", "majestic", "serpstat", "serper", "exa", "tavily", "keenable", "olostep", "scrapegraphai",
         "cloro",
+        # free-stack fork additions
+        "brave", "google-cse", "twitterapis",
         "lusha", "coresignal", "diffbot", "thecompaniesapi", "leadmagic", "fiber-ai",
         "companyenrich", "oceanio", "tomba", "trestleiq", "predictleads", "findymail", "branddev",
         "icypeas", "leadsforge", "influencersclub", "crustdata", "aviato",

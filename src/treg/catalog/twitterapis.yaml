@@ -1,0 +1,89 @@
+provider: twitterapis
+source:
+  docs: https://www.twitterapis.com
+  openapi: null
+  curated: '2026-09-25'
+pricing_url: https://www.twitterapis.com
+limits: "Flat ceiling of 600 requests/minute and 20 concurrent per key. Every read costs one $0.0008 call; new accounts get $0.50 in free credits (about 625 calls) with no credit card."
+
+endpoints:
+  - id: twitterapis.x.user.profile
+    capability: x.user.profile
+    platform: x
+    domain: social
+    scope: any_account
+    method: GET
+    path: /twitter/user/info
+    name: Get an X user's profile
+    summary: "Full public profile for a handle — bio, follower and following counts, post count, verified status."
+    input:
+      queryParams:
+        username: {type: string, required: true, example: "elonmusk"}
+    test_request:
+      queryParams: {username: "elonmusk"}
+    cost: &flat_call
+      type: per_call
+      value: 0.0008
+      currency: USD
+      per: 1
+      unit: call
+      source: docs
+      source_url: https://www.twitterapis.com
+      checked: '2026-09-25'
+      confidence: documented
+      note: "Flat $0.0008 per call, about 20 items per call on search and list endpoints. New accounts start with $0.50 in free credits (about 625 calls). Bad key observed live: HTTP 401 with error unauthorized."
+    docs_url: https://www.twitterapis.com
+
+  - id: twitterapis.x.search.posts
+    capability: x.search.posts
+    platform: x
+    domain: social
+    scope: any_account
+    method: GET
+    path: /twitter/tweet/advanced_search
+    name: Advanced search on X
+    summary: "Search posts with X's advanced operators — keyword, hashtag, mention, from:, since:/until: — about 20 posts per call with pagination cursor."
+    input:
+      queryParams:
+        query: {type: string, required: true, note: "X advanced-search operators supported.", example: "\"ai side hustle\" -filter:replies"}
+        query_type: {type: string, required: false, default: Top, enum: [Top, Latest]}
+        cursor: {type: string, required: false, note: "Pagination cursor from the previous response."}
+    test_request:
+      queryParams: {query: "\"ai side hustle\"", query_type: Latest}
+    cost: *flat_call
+    docs_url: https://www.twitterapis.com
+
+  - id: twitterapis.x.user.followers
+    capability: x.user.followers
+    platform: x
+    domain: social
+    scope: any_account
+    method: GET
+    path: /twitter/user/followers
+    name: List an X user's followers
+    summary: Page through an account's followers for community mapping and influencer discovery.
+    input:
+      queryParams:
+        username: {type: string, required: true, example: "elonmusk"}
+        cursor: {type: string, required: false, note: "Pagination cursor from the previous response."}
+    test_request:
+      queryParams: {username: "elonmusk"}
+    cost: *flat_call
+    docs_url: https://www.twitterapis.com
+
+  - id: twitterapis.x.post.detail
+    capability: x.post.detail
+    platform: x
+    domain: social
+    scope: any_account
+    method: GET
+    path: /twitter/tweet/thread
+    name: Expand a post into its thread
+    summary: Fetch a post and its full conversation thread (root plus replies) by post id, ready for summarising or research.
+    input:
+      queryParams:
+        id: {type: string, required: true, note: "Post id from the URL or a search result.", example: "1580661436132757506"}
+    test_request:
+      queryParams: {id: "1580661436132757506"}
+    cost: *flat_call
+    docs_url: https://www.twitterapis.com

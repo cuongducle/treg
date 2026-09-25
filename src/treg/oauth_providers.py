@@ -2533,6 +2533,105 @@ SERPER = OAuthProvider(
     probe_path="/account",
 )
 
+# ---- free-stack fork additions: free-tier-first providers upstream treg had not catalogued ----
+
+BRAVE = OAuthProvider(
+    service="brave",
+    display_name="Brave Search",
+    auth_kind="key",
+    token_label="Subscription token",
+    token_placeholder="your Brave subscription token",
+    token_header="X-Subscription-Token",
+    token_format="{secret}",
+    setup_url="https://api-dashboard.search.brave.com/app/subscriptions",
+    setup_action_label="Get your Brave Search API token",
+    setup_steps=(
+        "Register at brave.com/search/api (Free plan, no card) and open the API dashboard.",
+        "Copy the subscription token from your subscription details.",
+    ),
+    setup_note=(
+        "The Free plan allows 1 request/second and 2,000 queries/month. treg checks the key with "
+        "one web search when you connect it."
+    ),
+    auth_uri="", token_uri="",
+    scopes={},
+    client_id_setting="", client_secret_setting="",
+    category="SEO",
+    summary="Search the open web over Brave's own independent index, free up to 2,000 queries/month.",
+    base_url="https://api.search.brave.com",
+    docs_url="https://api-dashboard.search.brave.com/app/documentation/web-search",
+    # Live 2026-09-25: HTTP 422 {"error":{"code":"SUBSCRIPTION_TOKEN_INVALID"}} for a garbage
+    # token; 200 for a valid one. The free plan needs no card.
+    probe_path="/res/v1/web/search?q=test",
+    probe_cost_micro=0,
+)
+
+GOOGLE_CSE = OAuthProvider(
+    service="google-cse",
+    display_name="Google Custom Search",
+    auth_kind="key",
+    token_label="API key",
+    token_placeholder="your Google Cloud API key",
+    token_location="query",
+    token_param="key",
+    token_format="{secret}",
+    setup_url="https://console.cloud.google.com/apis/credentials",
+    setup_action_label="Get your Google API key",
+    setup_steps=(
+        "In Google Cloud Console, enable the Custom Search API and create an API key (no billing needed for 100 queries/day).",
+        "Create a Programmable Search Engine at programmablesearchengine.google.com with 'Search the entire web' enabled, and copy its cx id — every call needs it.",
+    ),
+    setup_note=(
+        "100 queries/day are free forever without billing. The connect probe uses Google's public "
+        "example engine, so it costs nothing against your daily quota."
+    ),
+    auth_uri="", token_uri="",
+    scopes={},
+    client_id_setting="", client_secret_setting="",
+    category="SEO",
+    summary="Real Google organic results via the Custom Search JSON API — 100 free queries/day, no card.",
+    base_url="https://www.googleapis.com",
+    docs_url="https://developers.google.com/custom-search/v1/overview",
+    # Live 2026-09-25: garbage key → HTTP 400 {"error":{"status":"INVALID_ARGUMENT","message":
+    # "API key not valid…"}}; valid key + Google's public example cx → 200.
+    probe_path="/customsearch/v1?q=test&cx=017576662512468239146%3Aomuauf_lfve",
+    token_reject_field="error",
+    probe_cost_micro=0,
+)
+
+TWITTERAPIS = OAuthProvider(
+    service="twitterapis",
+    display_name="TwitterAPIs",
+    auth_kind="key",
+    token_label="API key",
+    token_placeholder="your twitterapis.com API key",
+    token_header="x-api-key",
+    token_format="{secret}",
+    setup_url="https://www.twitterapis.com",
+    setup_action_label="Get your twitterapis.com API key",
+    setup_steps=(
+        "Sign up at twitterapis.com — $0.50 in free credits (about 625 calls), no card.",
+        "Copy the API key from the dashboard.",
+    ),
+    setup_note=(
+        "Every call is a flat $0.0008 against prepaid credits. treg checks the key with one free "
+        "profile lookup when you connect it."
+    ),
+    auth_uri="", token_uri="",
+    scopes={},
+    client_id_setting="", client_secret_setting="",
+    category="Social media",
+    summary="Search X, read profiles, threads and follower graphs at $0.0008 per call — about 250x cheaper than an official X API seat.",
+    base_url="https://api.twitterapis.com",
+    docs_url="https://www.twitterapis.com",
+    # Live 2026-09-25: every documented endpoint answers garbage keys with HTTP 401
+    # {"error":"unauthorized","message":"Missing or invalid x-api-key header."} — clean reject.
+    # Note the marketing site at www.twitterapis.com serves HTML for unknown paths; the API host
+    # is api.twitterapis.com.
+    probe_path="/twitter/user/info?username=twitter",
+    probe_cost_micro=800,
+)
+
 KEENABLE = OAuthProvider(
     service="keenable",
     display_name="Keenable",
@@ -3581,6 +3680,7 @@ REGISTRY: dict[str, OAuthProvider] = {
         # SEO API-key providers
         DATAFORSEO, SERANKING, MOZ, MAJESTIC, SERPSTAT, EXA, TAVILY, KEENABLE, OLOSTEP,
         SCRAPEGRAPHAI, SERPER, CLORO,
+        BRAVE, GOOGLE_CSE, TWITTERAPIS,
         # more Enrichment API-key providers
         LUSHA, CORESIGNAL, DIFFBOT, THECOMPANIESAPI, LEADMAGIC, FIBER_AI, CRUSTDATA, AVIATO,
         COMPANYENRICH, OCEANIO, ADYNTEL, TOMBA, TRESTLEIQ, PREDICTLEADS, FINDYMAIL, BRANDDEV, ICYPEAS, LEADSFORGE,
