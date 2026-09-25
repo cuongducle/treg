@@ -1,0 +1,73 @@
+provider: socialdata
+source:
+  docs: https://www.socialdata.tools/documentation
+  openapi: null
+  curated: '2026-09-25'
+pricing_url: https://www.socialdata.tools/pricing
+limits: "Pay per returned item only — failed requests are not billed. Rate limits scale with plan."
+
+endpoints:
+  - id: socialdata.x.search.posts
+    capability: x.search.posts
+    platform: x
+    domain: social
+    scope: any_account
+    method: GET
+    path: /twitter/search
+    name: "Search posts on X"
+    summary: "Keyword search over X posts with Top/Latest modes and cursor pagination, billed per returned tweet."
+    input:
+      queryParams:
+        query: {type: string, required: true, note: "X search operators supported.", example: "\"ai side hustle\" -filter:replies"}
+        type: {type: string, required: false, default: Top, enum: [Top, Latest]}
+        cursor: {type: string, required: false, note: "Pagination cursor from the previous response (next_cursor)."}
+    test_request:
+      queryParams: {query: "\"ai side hustle\"", type: Latest}
+    cost: &per_item
+      type: per_success
+      value: 0.0002
+      currency: USD
+      per: 1
+      unit: record
+      source: docs
+      source_url: https://www.socialdata.tools/pricing
+      checked: '2026-09-25'
+      confidence: documented
+      note: "$0.0002 per returned item ($0.20 per 1,000 tweets or profiles). Failed requests are explicitly not billed. Bad key observed live: HTTP 401 Unauthenticated."
+    docs_url: https://www.socialdata.tools/documentation
+
+  - id: socialdata.x.user.profile
+    capability: x.user.profile
+    platform: x
+    domain: social
+    scope: any_account
+    method: GET
+    path: /twitter/user/{screen_name}
+    name: "Get an X user's profile"
+    summary: "Full public profile for a handle."
+    input:
+      pathParams:
+        screen_name: {type: string, required: true, example: elonmusk}
+    test_request:
+      pathParams: {screen_name: elonmusk}
+    cost: *per_item
+    docs_url: https://www.socialdata.tools/documentation
+
+  - id: socialdata.x.user.posts
+    capability: x.user.posts
+    platform: x
+    domain: social
+    scope: any_account
+    method: GET
+    path: /twitter/user/{user_id}/tweets-and-replies
+    name: "List an X user's tweets and replies"
+    summary: "A user's timeline including replies, by numeric user id, with cursor pagination."
+    input:
+      pathParams:
+        user_id: {type: string, required: true, note: "Numeric X user id (from the profile endpoint).", example: "44196397"}
+      queryParams:
+        cursor: {type: string, required: false}
+    test_request:
+      pathParams: {user_id: "44196397"}
+    cost: *per_item
+    docs_url: https://www.socialdata.tools/documentation

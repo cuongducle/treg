@@ -20,15 +20,22 @@ treg secret add BRAVE_TOKEN --value <token>
 
 ---
 
-## 1. Fork bổ sung — 3 nhà cung cấp miễn phí mới (đã kiểm tra trực tiếp (live-probe) hành vi từ chối key rác ngày 2026-09-25)
+## 1. Fork bổ sung — 10 nhà cung cấp mới (đã kiểm tra trực tiếp hành vi từ chối khóa rác ngày 2026-09-25)
 
-| Nhà cung cấp | Mức miễn phí | Điểm cuối (Endpoint) | Cách lấy key |
+| Nhà cung cấp | Mức miễn phí / giá | Điểm mạnh | Cách lấy khóa |
 |---|---|---|---|
-| **Brave Search** | 2.000 truy vấn/tháng, 1 truy vấn/giây, không cần thẻ | `brave.web.search` — tìm kiếm web trên chỉ mục (index) độc lập của Brave | brave.com/search/api (gói Free) → dashboard sao chép (copy) token đăng ký |
-| **Google Custom Search** | 100 truy vấn/ngày vĩnh viễn, không cần bật thanh toán | `google-cse.google.serp.organic` — kết quả Google thật, 10 kết quả/trang | Google Cloud Console bật Custom Search API + tạo key; tạo công cụ tìm kiếm lập trình (programmable engine) "Search the entire web" để lấy `cx` |
-| **TwitterAPIs** | tặng 0,50 đô la (~625 lệnh gọi), sau đó 0,0008 đô la/lệnh gọi | `twitterapis.x.user.profile` / `.search.posts` / `.user.followers` / `.post.detail` | twitterapis.com đăng ký (không cần thẻ) → sao chép API key. Lưu ý: máy chủ (host) API là `api.twitterapis.com` (trang web www trả về HTML cho đường dẫn lạ — đã kiểm tra thực tế) |
+| **Brave Search** | 2.000 truy vấn/tháng, 1 truy vấn/giây, không cần thẻ | tìm kiếm web trên chỉ mục độc lập | brave.com/search/api (gói Free) → bảng điều khiển sao chép token |
+| **Google Custom Search** | 100 truy vấn/ngày vĩnh viễn | kết quả Google thật, 10 kết quả/trang | Google Cloud bật Custom Search API + tạo programmable engine "Search the entire web" để lấy `cx` |
+| **TwitterAPIs** | tặng 0,50 đô la (~625 lệnh gọi), sau 0,0008 đô la/lệnh gọi | hồ sơ / tìm kiếm / người theo dõi / chuỗi đăng X | twitterapis.com (không thẻ). Máy chủ API: `api.twitterapis.com` |
+| **SocialCrawl** | tặng 100 tín dụng không hết hạn | **44 nền tảng một giản đồ**: TikTok, Instagram, YouTube, X, Reddit, **tìm kiếm Douyin, tìm kiếm Xiaohongshu**, LinkedIn, Hacker News, Google, cửa hàng ứng dụng, TMDT + `/search/everywhere` quét mọi mạng xã hội một lệnh gọi | socialcrawl.dev → bảng điều khiển |
+| **SocialData** | 0,0002 đô la/kết quả (rẻ nhất X theo từng mục) | tìm kiếm bài đăng X, hồ sơ, dòng thời gian | socialdata.tools |
+| **twitterapi.io** | ~0,00015 đô la/lần đọc (trả theo lượng dùng) | 5 điểm cuối X: thông tin, bài gần đây, tìm kiếm nâng cao, người theo dõi, chi tiết | twitterapi.io |
+| **RedditAPIs** | 0,002 đô la/lệnh gọi, không thuê bao | tìm kiếm Reddit (q, subreddit, limit) | redditapis.com |
+| **TikAPI** | dùng thử 5 ngày; 29 đô la/tháng 300 yêu cầu/ngày | `/public/search/{category}`, `/public/followers`; duy nhất có OAuth cấp tài khoản TikTok (tin nhắn, nhắc đến) | tikapi.io |
+| **Firecrawl** | 500 tín dụng miễn phí, không cần thẻ | `/v2/scrape` (trang → Markdown sạch), `/v2/map` | firecrawl.dev |
+| **Reddit (chính thức)** | miễn phí dưới 100 truy vấn/phút (OAuth) | tìm kiếm, subreddit nóng/giới thiệu, chi tiết bài đăng | reddit.com/prefs/apps tạo ứng dụng web, chuyển hướng `<url>/auth/reddit/callback`, đặt biến `TREG_REDDIT_CLIENT_ID/_SECRET` |
 
-Ghi chú kiểm tra thực tế: Brave trả về mã lỗi 422 `SUBSCRIPTION_TOKEN_INVALID`, Google CSE trả về lỗi 400 `API key not valid`, TwitterAPIs trả về lỗi 401 `unauthorized` cho khóa rác — cả ba đều từ chối (reject) rõ ràng, đạt chuẩn kết nối của treg.
+Ghi chú kiểm tra trực tiếp: Brave 422 `SUBSCRIPTION_TOKEN_INVALID` · Google CSE 400 `API key not valid` · TwitterAPIs 401 `unauthorized` · SocialCrawl 401 `MISSING_API_KEY` (kèm đặc tả OpenAPI công khai 636 đường dẫn — nguồn chép tham số) · SocialData 401 `Unauthenticated` · twitterapi.io 401 sạch · RedditAPIs 403 `Invalid token` · TikAPI 400 lỗi trường · Firecrawl 401 trên `/v2/team/credit-usage`.
 
 ## 2. Đã có sẵn trong danh mục — chỉ cần kết nối (connect) key miễn phí
 
@@ -92,11 +99,9 @@ curl "https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT"
 
 Rủi ro pháp lý cần nhớ: LinkedIn kiện Proxycurl chết tháng 7/2025 (buộc xóa 401 triệu hồ sơ); các trình thu thập dữ liệu (crawler) nền tảng Trung Quốc và X đều từng bị gỡ kho. Luôn có phương án dự phòng (fork/sao lưu), không xây hạ tầng sống chết vào một trình thu thập dữ liệu (scraper).
 
-## 5. Chưa kiểm chứng được để vào danh mục (tự đăng ký dùng trực tiếp)
+## 5. Chưa đưa được vào danh mục
 
-- **EnsembleData** — miễn phí 50 đơn vị/ngày (~1.500/tháng) cho TikTok/Instagram; đường dẫn API chỉ thấy trong tài liệu (docs) sau khi đăng ký (đã dò nhưng không kiểm chứng được từ bên ngoài).
-- **SocialCrawl** — tặng 100 tín dụng không hết hạn, 44 nền tảng một giản đồ (schema) thống nhất; máy chủ (host) API chưa công khai rõ ràng (gặp lỗi SSL khi dò tên miền phụ).
-- **TikAPI** — dùng thử 5 ngày; 29 đô la/tháng nếu cần mức tài khoản (account-level) (DM, mentions) — duy nhất có OAuth TikTok.
+- **EnsembleData** — miễn phí 50 đơn vị/ngày (~1.500/tháng) cho TikTok/Instagram; máy chủ `app.ensembledata.com` không kết nối được từ máy dò (chặn ở tầng kết nối), điểm cuối chỉ hiển thị trong bảng điều khiển sau đăng ký — tự tạo tài khoản và dùng trực tiếp.
 
 ## 6. Bộ combo (stack) đề xuất cho nghiên cứu ngách (chi phí 0 đô la/tháng)
 

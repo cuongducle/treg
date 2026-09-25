@@ -1,7 +1,8 @@
 # Treg (OpenRouter for Tools)
 
-> **Free-stack fork.** This fork adds free-tier-first providers upstream had not catalogued
-> (Brave Search, Google Custom Search, TwitterAPIs) and ships **[FREE-STACK.md](FREE-STACK.md)** —
+> **Free-stack fork.** This fork adds ten free-tier-first providers upstream had not catalogued
+> (Brave Search, Google Custom Search, TwitterAPIs, SocialCrawl, SocialData, twitterapi.io,
+> RedditAPIs, TikAPI, Firecrawl, official Reddit OAuth) and ships **[FREE-STACK.md](FREE-STACK.md)** —
 > a Vietnamese guide to running a $0/month research stack on top of treg: free tiers to connect,
 > keyless public APIs, and self-hosted OSS crawlers for Chinese platforms.
 

@@ -2632,6 +2632,228 @@ TWITTERAPIS = OAuthProvider(
     probe_cost_micro=800,
 )
 
+SOCIALCRAWL = OAuthProvider(
+    service="socialcrawl",
+    display_name="SocialCrawl",
+    auth_kind="key",
+    token_label="API key",
+    token_placeholder="your SocialCrawl API key",
+    token_header="x-api-key",
+    token_format="{secret}",
+    setup_url="https://www.socialcrawl.dev",
+    setup_action_label="Get your SocialCrawl API key",
+    setup_steps=(
+        "Sign up at socialcrawl.dev — 100 free credits, no card, credits never expire.",
+        "Open the dashboard and copy an API key.",
+    ),
+    setup_note=(
+        "Every call costs 1 credit. treg checks the key with the free credits/balance route when "
+        "you connect it."
+    ),
+    auth_uri="", token_uri="",
+    scopes={},
+    client_id_setting="", client_secret_setting="",
+    category="Social media",
+    summary=(
+        "One API key across 44 platforms — TikTok, Instagram, YouTube, X, Reddit, Douyin, "
+        "Xiaohongshu, LinkedIn, Hacker News, Google, app stores, e-commerce — in one unified schema, "
+        "plus a search-everywhere omni endpoint."
+    ),
+    base_url="https://www.socialcrawl.dev/v1",
+    docs_url="https://www.socialcrawl.dev/docs",
+    # Live 2026-09-25: garbage key → HTTP 401 {"error":{"type":"MISSING_API_KEY"}} on
+    # /v1/tiktok/profile; /v1/openapi.json is public (636 paths) and was used to transcribe params.
+    probe_path="/credits/balance",
+    probe_cost_micro=0,
+)
+
+SOCIALDATA = OAuthProvider(
+    service="socialdata",
+    display_name="SocialData",
+    auth_kind="key",
+    token_label="API key",
+    token_placeholder="your socialdata.tools API key",
+    token_header="Authorization",
+    token_format="Bearer {secret}",
+    setup_url="https://www.socialdata.tools/",
+    setup_action_label="Get your SocialData API key",
+    setup_steps=(
+        "Sign up at socialdata.tools and open the dashboard.",
+        "Create an API key and copy it.",
+    ),
+    setup_note=(
+        "You are billed $0.0002 per returned tweet or profile; failed requests are free. The "
+        "connect probe runs one cheap search."
+    ),
+    auth_uri="", token_uri="",
+    scopes={},
+    client_id_setting="", client_secret_setting="",
+    category="Social media",
+    summary="Search X and read profiles and timelines at $0.0002 per returned item — among the cheapest X data routes anywhere.",
+    base_url="https://api.socialdata.tools",
+    docs_url="https://www.socialdata.tools/documentation",
+    # Live 2026-09-25: garbage bearer → HTTP 401 {"message":"Unauthenticated.","status":"error"}.
+    # Paths confirmed against open-source integrations (api.socialdata.tools/twitter/search,
+    # /twitter/user/{name}, /twitter/user/{id}/tweets-and-replies).
+    probe_path="/twitter/search?query=test",
+    # 1 search returns ~20 tweets at $0.0002 each → $0.004 worst case.
+    probe_cost_micro=4_000,
+)
+
+TWITTERAPIIO = OAuthProvider(
+    service="twitterapiio",
+    display_name="twitterapi.io",
+    auth_kind="key",
+    token_label="API key",
+    token_placeholder="your twitterapi.io API key",
+    token_header="X-API-Key",
+    token_format="{secret}",
+    setup_url="https://twitterapi.io",
+    setup_action_label="Get your twitterapi.io API key",
+    setup_steps=(
+        "Sign up at twitterapi.io and open the dashboard.",
+        "Copy the API key.",
+    ),
+    setup_note=(
+        "Read calls are metered per call (~$0.00015) from prepaid balance. treg checks the key "
+        "with one profile lookup when you connect it."
+    ),
+    auth_uri="", token_uri="",
+    scopes={},
+    client_id_setting="", client_secret_setting="",
+    category="Social media",
+    summary="X profiles, timelines, advanced search and follower graphs on pay-as-you-go credits, no monthly minimum.",
+    base_url="https://api.twitterapi.io",
+    docs_url="https://docs.twitterapi.io",
+    # Live 2026-09-25: every catalogued path answers a garbage key with HTTP 401
+    # {"error":"Unauthorized","message":"API key is invalid"}.
+    probe_path="/twitter/user/info?userName=twitter",
+    probe_cost_micro=150,
+)
+
+REDDITAPIS = OAuthProvider(
+    service="redditapis",
+    display_name="RedditAPIs",
+    auth_kind="key",
+    token_label="API key",
+    token_placeholder="your redditapis.com API key",
+    token_header="Authorization",
+    token_format="Bearer {secret}",
+    setup_url="https://www.redditapis.com",
+    setup_action_label="Get your redditapis.com API key",
+    setup_steps=(
+        "Sign up at redditapis.com (no subscription; metered per call).",
+        "Copy the bearer token from the dashboard.",
+    ),
+    setup_note=(
+        "Calls are metered from $0.002 each. treg checks the key with one cheap search when you "
+        "connect it."
+    ),
+    auth_uri="", token_uri="",
+    scopes={},
+    client_id_setting="", client_secret_setting="",
+    category="Social media",
+    summary="Search Reddit, read posts, comments and profiles on per-call billing with no monthly minimum.",
+    base_url="https://api.redditapis.com",
+    docs_url="https://www.redditapis.com/docs",
+    # Live 2026-09-25: garbage bearer → HTTP 403 {"error":"Invalid token"} on /api/reddit/search.
+    probe_path="/api/reddit/search?q=test&limit=1",
+    probe_cost_micro=2000,
+)
+
+TIKAPI = OAuthProvider(
+    service="tikapi",
+    display_name="TikAPI",
+    auth_kind="key",
+    token_label="API key",
+    token_placeholder="your TikAPI key",
+    token_header="X-TKAPI-Auth",
+    token_format="{secret}",
+    setup_url="https://tikapi.io",
+    setup_action_label="Get your TikAPI key",
+    setup_steps=(
+        "Sign up at tikapi.io (5-day free trial; Starter $29/mo for 300 requests/day).",
+        "Copy the API key from the dashboard.",
+    ),
+    setup_note=(
+        "Public-data reads draw from the daily request pool; the free /public/check route validates "
+        "the key at connect time."
+    ),
+    auth_uri="", token_uri="",
+    scopes={},
+    client_id_setting="", client_secret_setting="",
+    category="Social media",
+    summary="TikTok public search and follower data — and the only OAuth account-level TikTok route (mentions, DMs, live).",
+    base_url="https://api.tikapi.io",
+    docs_url="https://docs.tikapi.io",
+    # Live 2026-09-25: garbage key → HTTP 400 {"fields":{"X-API-KEY":"A valid API Key is required."}}
+    # on /public/check. Catalogued paths transcribed from TikAPI's official SDK (tikapi-io/tiktok-api).
+    probe_path="/public/check",
+    probe_cost_micro=0,
+)
+
+FIRECRAWL = OAuthProvider(
+    service="firecrawl",
+    display_name="Firecrawl",
+    auth_kind="key",
+    token_label="API key",
+    token_placeholder="fc-…",
+    token_header="Authorization",
+    token_format="Bearer {secret}",
+    setup_url="https://www.firecrawl.dev/app",
+    setup_action_label="Get your Firecrawl API key",
+    setup_steps=(
+        "Sign up at firecrawl.dev — 500 free credits, no card.",
+        "Open the app and copy an API key.",
+    ),
+    setup_note=(
+        "Each basic scrape or map costs 1 credit (heavier options more). treg checks the key with "
+        "the free credit-usage route when you connect it."
+    ),
+    auth_uri="", token_uri="",
+    scopes={},
+    client_id_setting="", client_secret_setting="",
+    category="SEO",
+    summary="Scrape pages to clean Markdown and map site URL structures — JS rendering handled, 500 free credits.",
+    base_url="https://api.firecrawl.dev",
+    docs_url="https://docs.firecrawl.dev",
+    # Live 2026-09-25: garbage bearer → HTTP 401 {"success":false,"error":"Unauthorized: Invalid token"}
+    # on GET /v2/team/credit-usage (the free balance route).
+    probe_path="/v2/team/credit-usage",
+    probe_cost_micro=0,
+)
+
+REDDIT = OAuthProvider(
+    service="reddit",
+    display_name="Reddit (official)",
+    auth_uri="https://www.reddit.com/api/v1/authorize",
+    token_uri="https://www.reddit.com/api/v1/access_token",
+    # duration=permanent is what yields a refresh_token; without it every connection becomes a
+    # manual-reconnect chore within an hour (Reddit access tokens live 3600s).
+    scopes={
+        "read": ["identity", "read"],
+        "write": ["identity", "read", "submit", "edit"],
+    },
+    client_id_setting="reddit_client_id",
+    client_secret_setting="reddit_client_secret",
+    category="Social media",
+    summary=(
+        "Search Reddit and read subreddits, posts and profiles through the official OAuth API — "
+        "free under 100 queries/minute for non-commercial use."
+    ),
+    base_url="https://oauth.reddit.com",
+    docs_url="https://developers.reddit.com",
+    token_endpoint_auth_method="client_secret_basic",  # Reddit wants Basic auth on the token endpoint
+    auth_params={"duration": "permanent"},
+    resource_label="account",
+    probe_path="/api/v1/me",
+    identity_path="/api/v1/me",
+    identity_id_path="id",
+    identity_label_path="name",
+    # Self-host note: create a 'web app' at https://www.reddit.com/prefs/apps with redirect URI
+    # <TREG_PUBLIC_URL>/auth/reddit/callback, then set TREG_REDDIT_CLIENT_ID / _SECRET here.
+)
+
 KEENABLE = OAuthProvider(
     service="keenable",
     display_name="Keenable",
@@ -3681,6 +3903,7 @@ REGISTRY: dict[str, OAuthProvider] = {
         DATAFORSEO, SERANKING, MOZ, MAJESTIC, SERPSTAT, EXA, TAVILY, KEENABLE, OLOSTEP,
         SCRAPEGRAPHAI, SERPER, CLORO,
         BRAVE, GOOGLE_CSE, TWITTERAPIS,
+        SOCIALCRAWL, SOCIALDATA, TWITTERAPIIO, REDDITAPIS, TIKAPI, FIRECRAWL, REDDIT,
         # more Enrichment API-key providers
         LUSHA, CORESIGNAL, DIFFBOT, THECOMPANIESAPI, LEADMAGIC, FIBER_AI, CRUSTDATA, AVIATO,
         COMPANYENRICH, OCEANIO, ADYNTEL, TOMBA, TRESTLEIQ, PREDICTLEADS, FINDYMAIL, BRANDDEV, ICYPEAS, LEADSFORGE,

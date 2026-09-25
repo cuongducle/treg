@@ -1,0 +1,86 @@
+provider: reddit
+source:
+  docs: https://developers.reddit.com
+  openapi: null
+  curated: '2026-09-25'
+pricing_url: https://developers.reddit.com
+limits: "Free for non-commercial use under 100 queries/minute (OAuth). Commercial use or higher rates require the paid tier. Connect via OAuth — set TREG_REDDIT_CLIENT_ID / TREG_REDDIT_CLIENT_SECRET on your self-hosted registry after creating a 'web app' at reddit.com/prefs/apps with redirect URI <your-public-url>/auth/reddit/callback."
+
+endpoints:
+  - id: reddit.reddit.search.posts
+    capability: reddit.search.posts
+    platform: reddit
+    domain: social
+    scope: any_account
+    method: GET
+    path: /search
+    name: "Search Reddit posts"
+    summary: "Official Reddit search across all subreddits with sort and time window."
+    input:
+      queryParams:
+        q: {type: string, required: true, example: "best crm for small business"}
+        sort: {type: string, required: false, enum: [relevance, hot, top, new, comments]}
+        t: {type: string, required: false, enum: [hour, day, week, month, year, all], note: "Time window with sort=top."}
+        limit: {type: integer, required: false, default: 25, min: 1, max: 100}
+        after: {type: string, required: false, note: "Pagination fullname cursor."}
+        restrict_sub: {type: boolean, required: false, note: "With subreddit, restrict to it (use the subreddit route instead)."}
+    test_request: {queryParams: {q: "side hustle", limit: 5}}
+    cost: {type: free, value: 0, currency: USD, unit: call, source: docs, source_url: https://developers.reddit.com, checked: '2026-09-25', confidence: documented, note: 'Free under 100 queries/minute for non-commercial use; this is the caller OAuth account, calls are never metered by treg.'}
+    docs_url: https://developers.reddit.com
+
+  - id: reddit.reddit.subreddit.posts
+    capability: reddit.subreddit.posts
+    platform: reddit
+    domain: social
+    scope: any_account
+    method: GET
+    path: /r/{subreddit}/hot
+    name: "List a subreddit's hot posts"
+    summary: "The hot feed of any subreddit with pagination."
+    input:
+      pathParams:
+        subreddit: {type: string, required: true, note: "Subreddit name without r/.", example: Entrepreneur}
+      queryParams:
+        limit: {type: integer, required: false, default: 25, min: 1, max: 100}
+        after: {type: string, required: false}
+    test_request:
+      pathParams: {subreddit: Entrepreneur}
+      queryParams: {limit: 5}
+    cost: {type: free, value: 0, currency: USD, unit: call, source: docs, source_url: https://developers.reddit.com, checked: '2026-09-25', confidence: documented, note: 'Free under the non-commercial 100 qpm OAuth limit.'}
+    docs_url: https://developers.reddit.com
+
+  - id: reddit.reddit.subreddit.info
+    capability: reddit.subreddit.info
+    platform: reddit
+    domain: social
+    scope: any_account
+    method: GET
+    path: /r/{subreddit}/about
+    name: "Get a subreddit's profile"
+    summary: "Subscribers, active users, description and metadata for any subreddit."
+    input:
+      pathParams:
+        subreddit: {type: string, required: true, example: Entrepreneur}
+    test_request:
+      pathParams: {subreddit: Entrepreneur}
+    cost: {type: free, value: 0, currency: USD, unit: call, source: docs, source_url: https://developers.reddit.com, checked: '2026-09-25', confidence: documented, note: 'Free under the non-commercial 100 qpm OAuth limit.'}
+    docs_url: https://developers.reddit.com
+
+  - id: reddit.reddit.post.detail
+    capability: reddit.post.detail
+    platform: reddit
+    domain: social
+    scope: any_account
+    method: GET
+    path: /comments/{article_id}
+    name: "Get a post with its comments"
+    summary: "A post's content and stats plus its comment tree by post id."
+    input:
+      pathParams:
+        article_id: {type: string, required: true, note: "Post id from a search or listing.", example: "1abcde"}
+      queryParams:
+        limit: {type: integer, required: false, note: "Max comments to return."}
+    test_request:
+      pathParams: {article_id: "1abcde"}
+    cost: {type: free, value: 0, currency: USD, unit: call, source: docs, source_url: https://developers.reddit.com, checked: '2026-09-25', confidence: documented, note: 'Free under the non-commercial 100 qpm OAuth limit.'}
+    docs_url: https://developers.reddit.com

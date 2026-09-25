@@ -1,0 +1,65 @@
+provider: tikapi
+source:
+  docs: https://docs.tikapi.io
+  openapi: null
+  curated: '2026-09-25'
+pricing_url: https://tikapi.io/#pricing
+limits: "Starter $29/month with 300 requests/day; Pro $79/2,000; Business $189/10,000. 5-day free trial. The only provider with OAuth account-level TikTok access (mentions, DMs) — the endpoints here are its public-data reads."
+
+endpoints:
+  - id: tikapi.tiktok.search
+    capability: tiktok.search.videos
+    platform: tiktok
+    domain: social
+    scope: any_account
+    method: GET
+    path: /public/search/{category}
+    name: "Search TikTok (general, users, videos, autocomplete)"
+    summary: "Public search across TikTok by category — general, users, videos or autocomplete. Paths and category enum transcribed from TikAPI's official SDK."
+    input:
+      pathParams:
+        category: {type: string, required: true, enum: [general, users, videos, autocomplete], example: general}
+      queryParams:
+        query: {type: string, required: false, note: "The keyword to search for.", example: "side hustle"}
+    test_request:
+      pathParams: {category: general}
+      queryParams: {query: "side hustle"}
+    cost:
+      type: per_call
+      value: 0.0032
+      currency: USD
+      per: 1
+      unit: call
+      source: docs
+      source_url: https://tikapi.io/#pricing
+      checked: '2026-09-25'
+      confidence: documented
+      note: "Starter is $29/month for 300 requests/day (~$0.0032 per request if the cap is used). 5-day free trial on signup. Bad key observed live: HTTP 400 with a clean JSON fields error."
+    docs_url: https://docs.tikapi.io
+
+  - id: tikapi.tiktok.user.followers
+    capability: tiktok.user.followers
+    platform: tiktok
+    domain: social
+    scope: any_account
+    method: GET
+    path: /public/followers
+    name: "List a TikTok user's followers"
+    summary: "Public followers of any user by secUid (transcribed from TikAPI's official SDK)."
+    input:
+      queryParams:
+        secUid: {type: string, required: true, note: "The user's secUid from their profile payload.", example: "secUid-from-profile-payload"}
+    test_request:
+      queryParams: {secUid: "secUid-from-profile-payload"}
+    cost:
+      type: per_call
+      value: 0.0032
+      currency: USD
+      per: 1
+      unit: call
+      source: docs
+      source_url: https://tikapi.io/#pricing
+      checked: '2026-09-25'
+      confidence: documented
+      note: "Same $29/month Starter pool (~$0.0032/request at the daily cap)."
+    docs_url: https://docs.tikapi.io

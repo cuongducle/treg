@@ -1,0 +1,36 @@
+provider: redditapis
+source:
+  docs: https://www.redditapis.com/docs
+  openapi: null
+  curated: '2026-09-25'
+pricing_url: https://www.redditapis.com
+limits: "No subscription, no monthly minimum; metered per call from $0.002. Read and write (post, comment, DM) endpoints exist — only read endpoints are catalogued here."
+
+endpoints:
+  - id: redditapis.reddit.search.posts
+    capability: reddit.search.posts
+    platform: reddit
+    domain: social
+    scope: any_account
+    method: GET
+    path: /api/reddit/search
+    name: "Search Reddit posts"
+    summary: "Keyword search across all of Reddit or inside one subreddit, with a result limit."
+    input:
+      queryParams:
+        q: {type: string, required: true, example: "side hustle"}
+        subreddit: {type: string, required: false, note: "Restrict the search to one subreddit.", example: Entrepreneur}
+        limit: {type: integer, required: false, example: 25}
+    test_request: {queryParams: {q: "side hustle", limit: 10}}
+    cost:
+      type: per_call
+      value: 0.002
+      currency: USD
+      per: 1
+      unit: call
+      source: docs
+      source_url: https://www.redditapis.com
+      checked: '2026-09-25'
+      confidence: documented
+      note: "Flat from $0.002 per call, no subscription (per redditapis.com). Bad key observed live: HTTP 403 with a clean JSON Invalid-token error."
+    docs_url: https://www.redditapis.com/docs

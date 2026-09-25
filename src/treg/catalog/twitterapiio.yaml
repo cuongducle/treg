@@ -1,0 +1,102 @@
+provider: twitterapiio
+source:
+  docs: https://docs.twitterapi.io
+  openapi: null
+  curated: '2026-09-25'
+pricing_url: https://twitterapi.io/pricing
+limits: "Pay-as-you-go per call; no monthly minimum. 600 requests/minute per key."
+
+endpoints:
+  - id: twitterapiio.x.user.profile
+    capability: x.user.profile
+    platform: x
+    domain: social
+    scope: any_account
+    method: GET
+    path: /twitter/user/info
+    name: "Get an X user's profile"
+    summary: "Public profile by userName — bio, follower counts, verified status, profile media."
+    input:
+      queryParams:
+        userName: {type: string, required: true, example: elonmusk}
+    test_request: {queryParams: {userName: elonmusk}}
+    cost: &flat
+      type: per_call
+      value: 0.00015
+      currency: USD
+      per: 1
+      unit: call
+      source: docs
+      source_url: https://twitterapi.io/pricing
+      checked: '2026-09-25'
+      confidence: documented
+      note: "About $0.00015 per read call (per twitterapi.io's published pricing). Bad key observed live: HTTP 401 with a clean JSON error."
+    docs_url: https://docs.twitterapi.io
+
+  - id: twitterapiio.x.user.posts
+    capability: x.user.posts
+    platform: x
+    domain: social
+    scope: any_account
+    method: GET
+    path: /twitter/user/last-tweets
+    name: "List an X user's recent tweets"
+    summary: "A user's recent tweets with cursor pagination."
+    input:
+      queryParams:
+        userName: {type: string, required: true, example: elonmusk}
+        cursor: {type: string, required: false}
+    test_request: {queryParams: {userName: elonmusk}}
+    cost: *flat
+    docs_url: https://docs.twitterapi.io
+
+  - id: twitterapiio.x.search.posts
+    capability: x.search.posts
+    platform: x
+    domain: social
+    scope: any_account
+    method: GET
+    path: /twitter/tweet/advanced_search
+    name: "Advanced search on X"
+    summary: "Search with X's advanced operators, Top or Latest mode, cursor pagination."
+    input:
+      queryParams:
+        query: {type: string, required: true, example: "\"ai side hustle\""}
+        queryType: {type: string, required: false, default: Latest, enum: [Top, Latest]}
+        cursor: {type: string, required: false}
+    test_request: {queryParams: {query: "\"ai side hustle\"", queryType: Latest}}
+    cost: *flat
+    docs_url: https://docs.twitterapi.io
+
+  - id: twitterapiio.x.user.followers
+    capability: x.user.followers
+    platform: x
+    domain: social
+    scope: any_account
+    method: GET
+    path: /twitter/user/followers
+    name: "List an X user's followers"
+    summary: "Page through an account's followers for community mapping."
+    input:
+      queryParams:
+        userName: {type: string, required: true, example: elonmusk}
+        cursor: {type: string, required: false}
+    test_request: {queryParams: {userName: elonmusk}}
+    cost: *flat
+    docs_url: https://docs.twitterapi.io
+
+  - id: twitterapiio.x.post.detail
+    capability: x.post.detail
+    platform: x
+    domain: social
+    scope: any_account
+    method: GET
+    path: /twitter/tweet/detail
+    name: "Get a post's detail"
+    summary: "A post's content and stats by id."
+    input:
+      queryParams:
+        id: {type: string, required: true, example: "1580661436132757506"}
+    test_request: {queryParams: {id: "1580661436132757506"}}
+    cost: *flat
+    docs_url: https://docs.twitterapi.io

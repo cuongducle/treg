@@ -34,7 +34,8 @@ def test_key_providers_are_offerable_without_deployment_credentials():
                 "coingecko", "polygon", "finnhub", "twelvedata", "fmp", "eodhd", "marketstack",
                 "tiingo", "financialdatasets", "tinyfish", "keenable", "olostep",
                 "scrapegraphai", "serper",
-                "brave", "google-cse", "twitterapis"):
+                "brave", "google-cse", "twitterapis",
+                "socialcrawl", "socialdata", "twitterapiio", "redditapis", "tikapi", "firecrawl"):
         p = P.get(svc)
         assert p is not None, svc
         assert p.auth_kind == "key", svc
@@ -192,7 +193,11 @@ async def test_fetchin_connect_accepts_valid_key_and_rejects_bad_key(clients, mo
 
 def test_paid_key_verification_probe_is_typed_and_unique():
     paid = {p.service: p.probe_cost_micro for p in P.REGISTRY.values() if p.probe_cost_micro}
-    assert paid == {"keenable": 4_000, "trestleiq": 15_000}
+    assert paid == {
+        "keenable": 4_000, "trestleiq": 15_000,
+        # free-stack fork additions whose connect probes are billed by the provider
+        "twitterapis": 800, "socialdata": 4_000, "twitterapiio": 150, "redditapis": 2_000,
+    }
     assert all(isinstance(p.probe_cost_micro, int) and p.probe_cost_micro >= 0
                for p in P.REGISTRY.values())
     listing = {row["service"]: row for row in P.listing()}

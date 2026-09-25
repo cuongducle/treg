@@ -44,7 +44,7 @@ def _q(payload: dict) -> dict:
 def test_every_provider_is_registered():
     assert set(P.REGISTRY) == {
         "google-search-console", "google-analytics", "google-business-profile", "google-tag-manager",
-        "google-ads", "youtube", "linkedin", "slack", "x", "tiktok",
+        "google-ads", "youtube", "linkedin", "slack", "x", "tiktok", "reddit",
         "facebook", "instagram", "meta-ads",
         # API-key providers (auth_kind="key")
         "adyntel", "anyapi", "apollo", "pdl", "akta", "hunter", "sumble", "moltsets", "openmart", "harvestapi", "fetchinio", "dropleads", "quickenrich", "prospeo", "aiark", "wiza", "limadata", "getleadsio", "scrubby", "zerobounce", "datagma", "contactout", "millionverifier", "bounceban", "trykitt", "crunchbase", "tikhub", "brightdata", "semrush", "justoneapi",
@@ -53,6 +53,7 @@ def test_every_provider_is_registered():
         "cloro",
         # free-stack fork additions
         "brave", "google-cse", "twitterapis",
+        "socialcrawl", "socialdata", "twitterapiio", "redditapis", "tikapi", "firecrawl",
         "lusha", "coresignal", "diffbot", "thecompaniesapi", "leadmagic", "fiber-ai",
         "companyenrich", "oceanio", "tomba", "trestleiq", "predictleads", "findymail", "branddev",
         "icypeas", "leadsforge", "influencersclub", "crustdata", "aviato",
