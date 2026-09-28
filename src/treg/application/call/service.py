@@ -13,6 +13,9 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 import httpx
 
 from ... import analytics, archive, audit, oauth, oauth_providers
+from ...application import hub as hub_app
+from ...application.hub import runner as hub_runner
+from ...application.hub import limits as hub_limits
 from ... import sandbox as demo_sandbox
 from ...client_identity import _norm_client
 from ...config import get_settings
@@ -276,6 +279,15 @@ def _burst_retry_after(provider: str, response: UpstreamResponse, body: bytes) -
     if signal.retry_after_s > SMOOTHING_RETRY_MAX_S:
         return None
     return float(signal.retry_after_s)
+
+
+def _account_out_2xx(mk: MarketplaceCall, response: UpstreamResponse, body: bytes) -> bool:
+    """A vendor that says "out of credits" inside a 2xx (Icypeas) is OUR account failing, not a
+    served answer: never archived, released by the settle, and treated by the breaker, the error
+    evidence and overflow as the error it is."""
+    return (mk.tier == "platform" and 200 <= response.status < 300
+            and capacity_signatures.is_exhausting(capacity_signatures.classify(
+                mk.provider, response.status, httpx.Headers(response.raw_headers), body[:4096])))
 
 
 def _refusal_kind(status_code: int) -> str | None:
@@ -591,6 +603,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
     mk: MarketplaceCall | None = None
     own_tool_miss: dict | None = None
     ep: dict | None = None
+    hub_row = None
     if request.context.input.catalog_only:
         # This reviewed surface accepts only a catalog id. A same-named team tool cannot shadow it.
         ep = _catalog_endpoint_for(rest)
@@ -608,10 +621,76 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
             # Only the 404 falls through, so an org tool with the same name always wins.
             ep = _catalog_endpoint_for(rest) if exc.status_code == 404 else None
             if ep is None:
-                raise
-            if (isinstance(exc.detail, dict)
+                # Third and last: a hub tool (`<team-slug>.<name>`), only when nothing above
+                # claimed the id — an own tool or a catalog id always wins.
+                hub_row = (await hub_app.tool_for(db, rest, caller_org_id=caller.org_id,
+                                                  caller_slug=caller.org.slug, caller_email=caller.email)
+                                   if request.context.input.child_of is None else None) if exc.status_code == 404 else None
+                if hub_row is None:
+                    raise
+            elif (isinstance(exc.detail, dict)
                     and str(exc.detail.get("hint", "")).startswith("your org has tool ")):
                 own_tool_miss = exc.detail
+    if hub_row is not None:
+        # A hub tool: the runner runs every step through THIS use case again (child contexts,
+        # own hold ids `{run}:s{n}`), then assembles one reply. The parent owns the idempotency
+        # label and the X-Treg-* stamping, exactly like a routed endpoint.
+        await db.commit()   # no pooled connection held across the steps' own sessions
+        try:
+            body_bytes = await _await_before_reserve(request.body(), request, call_ref)
+            try:
+                with hub_limits.slot(caller.org_id):
+                    response, charged = await hub_runner.run_hub_tool(
+                        request.context, hub_row, body_bytes, request.headers.get, upstream_client,
+                        execute_call, audit_client=_client_name(request))
+            except hub_limits.TeamBusy as busy:
+                raise ResolutionFailed("hub_busy", status_code=429, detail={
+                    "error": "hub_busy", "active": busy.active,
+                    "max": hub_limits.MAX_RUNS_PER_TEAM, "retry_after_s": hub_limits.RETRY_AFTER_S,
+                    "message": f"your team already has {busy.active} hub runs in flight; "
+                               f"try again in {hub_limits.RETRY_AFTER_S} s"}) from None
+        except asyncio.CancelledError:
+            await _finish_cancelled_call(request, None, call_ref)
+            raise
+        except CallFailure as exc:
+            request.state.call_audited = True
+            charged = (int(exc.detail.get("charged_micro") or 0)
+                       if isinstance(exc.detail, dict) else 0)
+            request.state.call_cost_micro = charged
+            if idem_key and charged > 0 and exc.kind == "hub_run_failed":
+                error_body = json.dumps({"detail": exc.detail}, ensure_ascii=False,
+                                        allow_nan=False, separators=(",", ":")).encode()
+                try:
+                    await _store_idempotent(
+                        idem_key, caller, status_code=exc.status_code, body=error_body,
+                        media_type="application/json", charged_micro=charged, metered=True,
+                        call_ref=call_ref, terminal=True)
+                except asyncio.CancelledError:
+                    await _finish_cancelled_call(request, None, call_ref)
+                    raise
+                request.state.idem_claim = None
+            if exc.kind != "hub_run_failed":   # the runner audits its own terminal failures
+                audit.record_call(
+                    org_id=caller.org_id, user_email=caller.email, tool_name=hub_row.tool_id,
+                    method=request.method, path=rest, status_code=exc.status_code,
+                    client=_client_name(request), refused_by=_refusal_kind(exc.status_code),
+                    telemetry={"call_ref": call_ref, "endpoint_id": hub_row.tool_id,
+                               "provider": "hub", "credential_tier": "hub", **_tag_telemetry(meta)})
+            raise
+        request.state.call_audited = True
+        request.state.call_cost_micro = charged
+        if idem_key:
+            try:
+                await _store_idempotent(idem_key, caller, status_code=response.status,
+                                        body=await _drain(response), media_type="application/json",
+                                        charged_micro=charged, metered=True, call_ref=call_ref)
+            except asyncio.CancelledError:
+                await _finish_cancelled_call(request, None, call_ref)
+                raise
+            request.state.idem_claim = None
+        _set_response_header(response, "X-Treg-Cost-Micro", str(charged))
+        _set_response_header(response, "X-Treg-Call-Id", call_ref)
+        return response
     if ep is not None and ep.get("kind") == "routed":
         # A first-party routed endpoint (treg.<capability>): the router picks children and runs
         # each through THIS use case again (child contexts, own hold ids), then assembles one
@@ -715,6 +794,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
             raise
         tool, upstream_url, drop_params = mk.tool, mk.upstream, mk.consumed
         request.context.marketplace = mk
+        mk.deferred = request.context.deferred_settles
     try:
         await _await_before_reserve(
             authorize_call(
@@ -922,6 +1002,8 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
             read_body=request.body,
         ), request, call_ref)
 
+    if mk is not None:
+        mk.deferred = request.context.deferred_settles
     if mk is not None and mk.tier == "platform" and mk.public_resource_ids:
         # Resolution already proved these ids are absent from every org's durable assignments.
         # End the DB phase before asking the provider whether each is an approved public resource.
@@ -942,7 +1024,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
         # phase ends here; the child places its own hold and the aggregator answers with none open.
         await db.commit()
         pending = _audit(503, charged_micro=0, refused_by="capacity",
-                         error_response="treg: own account exhausted — served via overflow",
+                         error_response="treg: own account exhausted — trying overflow",
                          defer_analytics=True)
         try:
             outcome = await overflow_cycle.maybe_overflow(
@@ -1189,7 +1271,8 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
                 # TREG_ARCHIVE_MODE says otherwise; record() is fire-and-forget and never raises.
                 # `own_credential` here means billed OAuth: the org's token, treg's bill.
                 if (mk.metered and archive.recording() and 200 <= response.status < 300
-                        and not (own_credential and _echoes_own_credential(tool, secrets, body))):
+                        and not (own_credential and _echoes_own_credential(tool, secrets, body))
+                        and not _account_out_2xx(mk, response, body)):
                     _ct = next((v.decode("latin-1") for k, v in response.raw_headers
                                 if k.lower() == b"content-type"), "")
                     body_observation = archive.archive_bodies.StorageReport(
@@ -1308,6 +1391,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
                         and 200 <= response.status < 300)
         rejected = _submission_rejected(mk, body) if terminal_2xx else ""
         deferred = terminal_2xx and not rejected
+        account_out_2xx = _account_out_2xx(mk, response, body)
         try:
             request.context.finalization = FinalizationState.FINALIZING
             if deferred:
@@ -1370,7 +1454,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
             await _finish_cancelled_call(request, mk, call_ref, response)
             raise
         capacity_signal = None
-        if response.status >= 400:
+        if response.status >= 400 or account_out_2xx:
             # Did the provider just say OUR account is out? Mark it for the next caller (plan
             # §4.1). After the settle on purpose: the hold is closed, no connection is held.
             try:
@@ -1379,7 +1463,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
             except asyncio.CancelledError:
                 await _finish_cancelled_call(request, mk, call_ref, response)
                 raise
-        elif response.status < 300:
+        elif response.status < 300:  # a 2xx that says the account is out is no recovery
             try:
                 await _note_capacity_recovery(mk)
             except asyncio.CancelledError:
@@ -1389,7 +1473,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
         # (see _refusal_kind). So this is where the provider's own explanation is captured, and the
         # only place it exists: nothing downstream keeps the body.
         err_request = err_response = None
-        if response.status >= 400:
+        if response.status >= 400 or account_out_2xx:
             _renderings = _safe_secret_renderings(tool, secrets)
             if _renderings is None:
                 err_request = err_response = _ERROR_MASKING_FAILED
@@ -1400,7 +1484,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
                     tool, caller_body, _renderings)
                 err_response = _error_response_evidence(
                     response.raw_headers, body, _renderings)
-        may_overflow = response.status >= 400 and mk.tier == "platform"
+        may_overflow = (response.status >= 400 or account_out_2xx) and mk.tier == "platform"
         from ...domain.catalog.results import classify, has_result_rules
 
         result = classify(mk.endpoint_id, response.status, body)

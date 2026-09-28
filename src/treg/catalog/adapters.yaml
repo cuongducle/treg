@@ -1134,6 +1134,16 @@ adapters:
     const: {queryParams.engine: google_maps, queryParams.type: search}
     out: {places: local_results}
     miss: "local_results == []"
+  apify.google.serp.maps:
+    accepts: [[q]]
+    in:  {q: body.searchStringsArray}
+    in_expr: {body.searchStringsArray: "list(q)", body.locationQuery: "country_name(country)", body.language: language}
+    # treg's key needs the run's spend cap, timeout and memory; 20 places bill at most 20 rows + the start.
+    const: {queryParams.maxTotalChargeUsd: "0.25", queryParams.timeout: "90", queryParams.memory: "1024",
+            body.maxCrawledPlacesPerSearch: 20, body.maxCrawledPlaces: 20, body.scrapeContacts: false,
+            body.scrapePlaceDetailPage: false, body.maxReviews: 0}
+    out: {places: ".", count: "len(.)"}
+    miss: ". == []"
 
   # ---- tiktok.user.videos (batch 5) ------------------------------------------------------------
   justoneapi.tiktok.user.videos:
@@ -1516,13 +1526,6 @@ adapters:
     out: {video_id: data.video_id, title: data.title, channel: data.author, channel_id: data.channel_id, description: data.description,
           views: data.view_count, duration_seconds: data.length_seconds, published: data.publish_date}
     miss: "data.video_id == null"
-  tikhub.youtube.video.detail:
-    accepts: [[video_id]]
-    in:  {video_id: queryParams.video_id}
-    out: {video_id: data.videoDetails.videoId, title: data.videoDetails.title, channel: data.videoDetails.author,
-          channel_id: data.videoDetails.channelId, description: data.videoDetails.shortDescription,
-          views: data.videoDetails.viewCount, duration_seconds: data.videoDetails.lengthSeconds}
-    miss: "data.videoDetails == null"
   justoneapi.youtube.video.detail:
     accepts: [[video_id]]
     in:  {video_id: queryParams.videoId}
@@ -1941,16 +1944,19 @@ adapters:
     in:  {post_id: queryParams.id}
     out: {post: data}
     miss: "data == null"
-  tikhub.x.weibo-web-fetch-post-detail:
-    accepts: [[post_id]]
-    in:  {post_id: queryParams.post_id}
-    out: {post: data.data}
-    miss: "data.data == null"
   tikhub.x.weibo-app-fetch-status-detail:
     accepts: [[post_id]]
     in:  {post_id: queryParams.status_id}
     out: {post: data.detailInfo.status}
     miss: "data.detailInfo == null"
+  apify.weibo.post.detail:
+    accepts: [[post_id]]
+    in:  {post_id: body.post_ids}
+    in_expr: {body.post_ids: "list(post_id)"}
+    const: {body.mode: post, queryParams.maxTotalChargeUsd: "0.05", queryParams.timeout: "90",
+            queryParams.memory: "1024"}
+    out: {post: "[0]"}
+    miss: "[0] == null"
 
   predictleads.companies.job_openings:
     accepts: [[domain]]
@@ -2236,12 +2242,8 @@ adapters:
     const: {queryParams.page: "1", queryParams.enrich: "false"}
     out: {people: items, count: totalResults}
     miss: "items == []"
-  companyenrich.people.search.scroll:
-    accepts: [[company_domain, title], [company_domain]]
-    in:  {company_domain: body.domains, title: body.positionQuery}
-    in_expr: {body.domains: "list(company_domain)", body.positionQuery: "list(title)", body.pageSize: limit}
-    out: {people: items, count: totalItems, next_cursor: nextCursor}
-    miss: "items == []"
+  # No adapter for companyenrich.people.search.scroll: its first page is the same query against the
+  # same index as companyenrich.people.search, so routing both billed one empty answer twice.
   crustdata.people.search:
     accepts: [[full_name]]
     in:  {full_name: body.filters.value}

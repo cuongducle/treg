@@ -58,6 +58,7 @@ from .routers import call as call_routes
 from .routers import catalog as catalog_routes
 from .routers import connections as connection_routes
 from .routers import feedback as feedback_routes
+from .routers import hub as hub_routes
 from .routers import media as media_routes
 from .routers import onboard as onboard_routes
 from .routers import orgs as org_routes
@@ -186,10 +187,7 @@ def _app_version() -> str:
     if _app_version_cache is None or _app_version_cache[0] != mtime:
         digest = hashlib.sha256(index.read_bytes()).hexdigest()[:12]
         _app_version_cache = (mtime, digest)
-    settings = get_settings()
-    rollout = (settings.dashboard_rollout_enabled, settings.dashboard_rollout_percent,
-               sorted(settings.dashboard_rollout_user_ids))
-    return hashlib.sha256(f"{_app_version_cache[1]}:{rollout}".encode()).hexdigest()[:12]
+    return _app_version_cache[1]
 
 
 @app.get("/meta")
@@ -212,6 +210,9 @@ async def meta() -> dict:
             "posthog_key": s.posthog_key, "posthog_host": s.posthog_host.rstrip("/") if s.posthog_key else "",
             # public workspace id — only present when this deployment opts in (self-hosters load no widget)
             "intercom_app_id": s.intercom_app_id,
+            # Whether the hub routes exist here at all (TREG_HUB_ENABLED), so the dashboard asks
+            # them nothing when they would only answer 404. Per-team access is still probed.
+            "hub": bool(s.hub_enabled),
             # Config only, no database: lets the top-bar referral entry name the reward on every page
             # without calling GET /referrals, which mints a code and runs the payout sweep.
             "referral": {"referrer_micro": int(s.referral_referrer_micro),
@@ -311,6 +312,7 @@ async def create_tool_request(
 
 
 router.routes.extend(feedback_routes.app.routes)
+router.routes.extend(hub_routes.app.routes)
 router.routes.extend(media_routes.app.routes)
 router.routes.extend(auth_routes.social_router.routes)
 router.routes.extend(auth_routes.cli_router.routes)         # CLI pairing

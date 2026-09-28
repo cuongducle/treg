@@ -40,8 +40,6 @@ pricing_url: https://www.icypeas.com/pricing
 
 proposed_capabilities:
   companies.emails.role: "Find a company's role-based email addresses (contact@, support@, info@)"
-  people.search.count: "Count the people matching a search before paying for the rows"
-  companies.search.count: "Count the companies matching a search before paying for the rows"
   people.profile.url: "Find a person's professional profile URL from their name and company"
   companies.profile.url: "Find a company's professional profile URL from its name or domain"
   people.job.start: "Start a bulk contact-data job over many rows"
@@ -420,6 +418,8 @@ endpoints:
       checked: '2026-08-20'
       confidence: documented
       note: "1 credit per found URL; a miss is free"
+    # A miss is HTTP 200 with a status other than FOUND; this is what settles it at zero.
+    expect: {json_path: status, equals: FOUND}
     verified: '2026-08-20'
     example_response: examples/icypeas.people.profile.url.json
     docs_url: https://api-doc.icypeas.com/scrape/user-profile-url-search
@@ -450,6 +450,8 @@ endpoints:
       checked: '2026-08-20'
       confidence: documented
       note: "1 credit per found URL; a miss is free"
+    # A miss is HTTP 200 with a status other than FOUND; this is what settles it at zero.
+    expect: {json_path: status, equals: FOUND}
     verified: '2026-08-20'
     example_response: examples/icypeas.companies.profile.url.json
     docs_url: https://api-doc.icypeas.com/scrape/company-profile-url-search

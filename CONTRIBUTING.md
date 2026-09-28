@@ -44,7 +44,12 @@ require a frontend build, so CLI and background-worker development remains indep
    Commit messages follow Conventional Commits (`feat(scope): …`, `fix: …`, `docs: …`).
 3. Add or update tests; run `uv run --with pytest-xdist pytest -n auto -q` (all green).
    Serial `uv run --frozen python -m pytest -q` is for debugging one test or order.
-   The Postgres CI job must stay serial (`reset_db()` drops tables on a shared database).
+   Against Postgres, set `TREG_TEST_DB_URL`; each xdist worker creates its own database from it.
+   Tests must pass in any order. To check, shuffle with a few seeds (pytest-randomly is not a
+   project dependency, so CI order stays fixed):
+   `uv run --with pytest-xdist --with pytest-randomly pytest -n auto -q -p randomly --randomly-seed=<n>`.
+   Restore whatever a test changes: `monkeypatch.chdir`, `monkeypatch.setenv`, `tmp_path`, and
+   repo files resolved from `Path(__file__).parents[1]`, not the working directory.
 4. If you changed a subsystem, update its fragment in `docs/context/` in the same PR.
 5. Open a PR. CI runs the tests + a secret scan; a maintainer reviews.
 

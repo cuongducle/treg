@@ -3,6 +3,7 @@ title: The web dashboard (served from FastAPI)
 status: shipped
 sources:
   - src/treg/web/sitetrack.js
+  - frontend/README.md
   - frontend/index.html
   - frontend/package.json
   - frontend/vite.config.ts
@@ -11,6 +12,7 @@ sources:
   - frontend/src/state/resources.js
   - frontend/src/state/resourcesComputed.js
   - frontend/src/App.vue
+  - frontend/src/views.ts
   - frontend/src/api.ts
   - frontend/src/components/DashboardNavigation.vue
   - frontend/src/components/PublicNavigation.vue
@@ -22,6 +24,7 @@ sources:
   - frontend/src/dialogs/ConnectTokenDialog.vue
   - frontend/src/dialogs/ConnectionMethodDialog.vue
   - frontend/src/dialogs/CopyToolDialog.vue
+  - frontend/src/dialogs/dialog.ts
   - frontend/src/dialogs/EditToolDialog.vue
   - frontend/src/dialogs/ExtraCredentialDialog.vue
   - frontend/src/dialogs/ImportSkillDialog.vue
@@ -85,11 +88,18 @@ sources:
   - frontend/src/state/sharing.js
   - frontend/src/state/skills.js
   - frontend/src/state/snippets.js
+  - frontend/src/state/storage.js
   - frontend/src/state/team.js
+  - frontend/src/state/tickets.js
   - frontend/src/state/tools.js
   - frontend/src/state/tryTool.js
   - frontend/src/styles/base.css
-  - src/treg/web/agent-setup.js
+  - frontend/src/agent-setup/index.ts
+  - frontend/src/agent-setup/data.ts
+  - frontend/src/agent-setup/AgentPicker.vue
+  - frontend/src/agent-setup/SetupInstructions.vue
+  - frontend/src/agent-setup/TryItOut.vue
+  - frontend/vite.agent-setup.config.ts
   - src/treg/web/media/redesign/dashboard.css
   - src/treg/web/media/redesign/SOURCES.md
   - src/treg/web/vendor/README.md
@@ -99,8 +109,6 @@ sources:
   - src/treg/web/tour/tour.js
   - src/treg/web/tour/index.html
   - src/treg/api.py
-  - tests/test_dashboard_rollout.py
-  - src/treg/web/dashboard-legacy/README.md
   - src/treg/routers/web.py
   - src/treg/domain/identity/session.py
   - src/treg/routers/api_keys.py
@@ -202,38 +210,57 @@ per-application state available to extracted components during this incremental 
 not a singleton, and this boundary is not yet a fully typed domain store. The TypeScript entry,
 JSON transport and development configuration are checked with `vue-tsc` before every build.
 Initialization renders a neutral loading state until session and route resolution finish, with a
-retry on unexpected failure. Signed-out arrivals get a focused sign-in entry or shared-link gate;
+retry on unexpected failure. `index.html` paints the same `.boot-status` markup before any script
+runs, so mounting swaps the screen for itself. A fast boot shows only the page ground: the
+indicator fades in after a delay, on the page's own clock (`bootStartedAt`), so the node Vue swaps
+in does not restart it. `index.html` also starts
+`/meta` and `/auth/me` alongside the bundle download (`window.__tregBoot`, taken over by boot) and
+applies the saved theme before first paint. Everything the app keeps in `localStorage` is a
+convenience (theme, active team, token-mode config, a deep link parked across sign-in), read and
+written only through `state/storage.js`, which never throws: with site data blocked (Safari throws on
+the first touch of `localStorage`) a read is empty and a write is dropped. `loadAll` waits on one round trip per dependency step:
+`/orgs` with `/invites/mine`, then the bearer with the team's tools, health and skills.
+**A late answer never overwrites a newer one.** Each loader a team switch or a newer call can
+overtake (`loadAll`, the Team roster, billing, keys, Activity, secrets, team resources, connections,
+the hub probe, a catalog platform, a detail page) takes a ticket from `state/tickets.js` and checks it
+after every await; a newer call of the same loader, or for team-scoped data a switch to another
+team, drops the late answer. The Team roster's requests run in parallel. A switch also clears the
+previous team's billing and closes the top-up dialog, and `payTopup` refuses billing that belongs
+to another team and stops before Checkout if the team changes mid-way.
+Catalog data does not wait for the session: boot starts the shelves (and a shelf's endpoints,
+through `prefetchPlatform`, which `loadPlatform` takes over) alongside `/meta` and `/auth/me`.
+**A view renders nothing it cannot yet know.** Empty states, zero figures and fallback views wait
+for their data to answer (`plats.settled`, `callsLoaded`, `orgMembersLoaded`, `ref.loaded`); text
+whose values are still loading keeps its space invisibly rather than showing zeros. Signed-out arrivals get a focused sign-in entry or shared-link gate;
 the obsolete embedded marketing page is removed. The public landing page remains at `/`.
 History navigation retains existing hashes, catalog URLs and shared links in `state/navigation.js`,
 `state/catalog.js`, `state/details.js` and `state/boot.js`.
 Mainline Team resources and Fish Audio upload, voice-management and audio-preview flows live
 in `TeamResourcesPage.vue`, `FishVoiceDialog.vue`, `TryEndpointDialog.vue` and their state modules.
 
-`_new_dashboard` selects the compiled entry by verified session user ID: the master rollout switch
-must be on, then an ID allowlist or a stable SHA-256 bucket below the configured percentage selects
-new. Defaults are off and zero percent. Anonymous and token-only browser entries retain the frozen
-`dashboard-legacy/index.html`, whose Vue/onboarding/tutorial JavaScript has revision-qualified legacy asset
-URLs. No query parameter, team selection or analytics service controls assignment. All dashboard,
-shared-link and catalog entries use this decision and `private, no-store` plus `Vary: Cookie`.
-Environment changes require restarting Web processes. Existing tabs switch on reload; the version
-stamp also incorporates rollout settings to offer a refresh when assignment policy changes.
-Every signed-in selection emits `dashboard_served` (variant, assignment, bucket, percentage) and
-sets the `dashboard_variant` and `dashboard_bucket` person properties. Analytics only observes the
-decision: PostHog persons carry no user ID to recompute the bucket from, and the bucket alone cannot
-date an account's switch when the percentage moves.
-
-The legacy snapshot is deprecated and scheduled for removal after rollout, not a second maintained
-Dashboard. New features and routine fixes belong only in `frontend/`; normal main-branch syncs must
-not refresh the frozen artifact. `frontend/README.md` owns the retirement checklist: migrate
-anonymous and token-only entries as well as signed-in accounts, then remove the snapshot, legacy
-asset route, selection settings and obsolete rollout plumbing. A 100% account rollout alone does
-not retire legacy.
+`_dashboard_index` returns the one compiled entry for every Dashboard, shared-link and catalog
+request, signed in or not, so those pages no longer look up the session to choose a frontend. They
+are served `private, no-store` with `Vary: Cookie`. The frozen legacy snapshot and its percentage
+rollout were retired once every visitor was on this app; rollback is a deploy of the previous build.
+The version stamp in `/meta` is the bundle hash, so an open tab offers a refresh after a deploy.
 
 `GET /app` serves the selected document same-origin from the Python package, preserving local
 sign-in and parked OAuth authorization. Catalog and shared-link handlers modify that same document's
 metadata as before. `_app_version()` hashes the built entry, whose asset filenames change with
 bundle content. HTML is not cached; `/app/ui/assets/{name}` serves immutable hashed assets and
 returns 404 for missing files. Assets remain a control-role surface.
+
+The entry chunk carries Vue, the shell (navigation, sign-in, the signed-out page) and the state
+modules; every page and dialog is its own chunk, registered in `frontend/src/views.ts` and mounted
+by `App.vue` behind the same `v-if`s as before. `preloadInitialView` starts the chunk for the URL
+being opened (read with boot's own route parsers) before mount, alongside `/meta` and `/auth/me`.
+After boot, `prefetchAfterBoot` loads one chunk per idle period: every screen and dialog for a
+member except Help (it would pull in the tutorial scripts), only the catalog pages for a public
+visitor. It resolves the async wrapper itself, so a prefetched screen renders synchronously and
+navigation shows no blank frame. A dialog whose chunk arrives late still gets `v-dialog`'s focus,
+trap and focus return, since the directive acts when the dialog mounts. Matter.js ships only in
+the `/search` chunk. A chunk that fails to load after
+retries asks `checkVersion`, which offers the refresh toast when a deploy replaced the build.
 
 `bash scripts/build-dashboard.sh` installs the npm lockfile and builds into the gitignored
 `src/treg/web/dashboard/` directory. Hatch includes it in distributions and rejects missing builds;
@@ -243,8 +270,12 @@ and Vite, using a local-only development entry for hot updates. See `CONTRIBUTIN
 ### Browser dependencies
 
 Vue is pinned in the npm lockfile and bundled from the same origin, so a blocked CDN cannot
-prevent startup. The shared onboarding widgets in `/agent-setup.js` still serve both Dashboard and
-Arena; their templates use Vue's bundled compiler. The global Vue runtime for standalone pages and the legacy snapshot is
+prevent startup. The Dashboard bundles Vue's runtime only, never the template compiler: every
+component is a compiled SFC. The onboarding widgets shared with Arena live in
+`frontend/src/agent-setup/`, their one source. The Dashboard imports them directly, and
+`vite.agent-setup.config.ts` compiles the same modules into the classic `/agent-setup.js` script
+(generated into `src/treg/web/dashboard/`, served no-cache), which exposes `window.TregAgentSetup`
+on Arena's global Vue build. The global Vue runtime for the standalone Arena page is
 copied from the npm package at build time, with its license; generated copies are not committed. Agent icons and Google Fonts remain optional external presentation assets.
 The unmounted entry displays a loading message and a reload link rather than hiding a raw template.
 The authenticated redesign follows the root `design.md`.
@@ -254,11 +285,13 @@ The authenticated redesign follows the root `design.md`.
 pageviews on; `initAnalytics()` in the SPA defers to it (`window.__phInit`) and only identifies, keeping
 its inline init as the fallback for a stale bundle. Landing-page visitors used to be invisible to
 analytics — PostHog first met them on `/app` after OAuth, as `$direct` — so this ordering is the whole
-point. `<script src="/adtrack.js">` — the first-party ad-click capture — loads **in `<head>`** on every
-page, guaranteed to run during HTML parsing before any app code can navigate away. An ad click landing
+point. `<script src="/adtrack.js">` - the first-party ad-click capture - loads **in `<head>`** on every
+page, guaranteed to run before any app code can navigate away. An ad click landing
 on `/?gclid=…` falls through to the SPA (because of the query string), whose boot redirects logged-out
-visitors via `location.replace('/')`. Placing capture in `<head>` ensures the click id is stored before
-that redirect can drop the query string. No Google tag, first-party cookie only; see
+visitors via `location.replace('/')`. Capture must store the click id before that redirect can drop the
+query string. In the Dashboard both scripts are `defer` in `<head>`, ahead of the module entry: deferred
+and module scripts run in document order once parsing ends, so neither blocks the first paint and both
+still run before the app (`tests/test_adsconv.py` pins the order). No Google tag, first-party cookie only; see
 [ads-conversions](../architecture/ads-conversions.md).
 
 ## Shell & design system (2026 rework)
@@ -289,8 +322,9 @@ user. On narrow screens navigation scrolls in a second row; team switching and o
 remain available. The public catalog and logged-out landing retain their separate shells.
 
 The authenticated wrapper's `.redesign` class scopes `media/redesign/dashboard.css`, served through
-the existing `/media` mount. It uses Google Sans Flex for interface text, Geist Pixel for page titles,
-and DM Mono for commands and balances, with light and dark semantic colors. Getting started uses
+the existing `/media` mount. It uses the system UI font for interface text, Geist Pixel for page titles,
+and DM Mono for commands and balances (the only two web fonts, bundled from pinned `@fontsource`
+packages; see `design.md`), with light and dark semantic colors. Getting started uses
 an approximately 1080px centered column, a split agent-preview/setup card, image-backed prompt cards,
 and the existing optional Build on treg and manual setup flows. On mobile the setup card and prompt
 grid stack. Images are copied from the pinned designer repository; provenance is in
@@ -300,10 +334,19 @@ Copy failures, including unavailable clipboard APIs, surface a dismissible messa
 or outside interaction. The search entry on Getting started navigates to Catalog and focuses the
 existing search field. Team settings and switching retain the existing `orgSettings` / `switchTo`
 behavior, including fixed-position dropdown placement via `placeOrgMenu`. The team picker supports
-Enter and Space; Escape restores focus to its trigger. Direct `go` navigation returns to the top of
+Enter and Space; Escape restores focus to its trigger. Every modal and drawer carries `v-dialog`
+(`dialogs/dialog.ts`, registered in `main.ts`) on its `role="dialog"` element, one keyboard contract
+instead of per-dialog code: focus moves to its first field (else the dialog itself), Tab and
+Shift+Tab stay inside, Escape closes the topmost open dialog through the close function it was
+given, and focus returns to the control that opened it. A required decision (the first-run welcome,
+the first-run invite choice) passes no close function and survives Escape. Every `role="dialog"` element is
+named by its title (`aria-labelledby`) or an `aria-label`. `closeOverlays` only
+closes the page's menus. Direct `go` navigation returns to the top of
 the destination; Back/Forward leaves scroll restoration to the browser. Category/team tabs and wide
 tables scroll locally on small screens, and the onboarding OAuth divider wraps instead of widening
-the page.
+the page. At phone width inline `code` (a hub tool's `uses`) breaks anywhere, the top-up amounts
+wrap to three columns, and a merged ledger row puts its provider chips on their own line above the
+price: the page body never scrolls sideways (`e2e/mobile.spec.ts`).
 
 ## Standalone Enrich Arena
 
@@ -560,7 +603,7 @@ Server side (`domain.identity.access`): `require_identity` (who, from token OR s
   shows a **mandatory "name your team" welcome** (`welcome.*`; team name pre-suggested from the email
   domain via `_suggestTeamName`). Step 0 is NOT dismissable — no skip, survives Escape/backdrop — the only
   action is `welcomeCreate` (`POST /orgs`, marks onboarded). The agent picker and setup instruction
-  components and the final Try it out step are shared with Enrich Arena through `/agent-setup.js`, including client definitions,
+  components and the final Try it out step are shared with Enrich Arena through `frontend/src/agent-setup/`, including client definitions,
   logo URLs, the optional plugin step and masked/copyable credentials. Three more steps follow **inside the same
   modal**: an **agent picker** (`welcome.step===1` — OpenClaw / Grok Bot / Hermes Agent / Claude.ai /
   Claude Code / Codex, plus a "More" expander with opencode / pi / Cursor / Gemini CLI / Other; LobeHub icons via
@@ -640,7 +683,9 @@ selected account stamps a runnable containers-list path into the provisioned too
 platform logo assets both carry the Google Tag Manager mark, so the catalog tile, platform header,
 provider page, and expanded endpoint rows resolve to the same identity.
 The tab bar itself is `v-if`'d on `plats.list.length` and `mkTabActive` collapses to `'platform'` when
-the catalog is absent, so a build that predates `/catalog` renders exactly the old marketplace.
+the catalog is absent, so a build that predates `/catalog` renders exactly the old marketplace. It
+collapses only once `plats.settled` (the request answered, even with a failure): falling back while
+the shelves loaded flashed the integration list on every visit.
 
 The catalog page's header carries a **Request a tool** button (`reqAsk` modal): a short form —
 what's missing, an optional note, a contact field only when signed out (`!me`) — POSTed to
@@ -1056,9 +1101,8 @@ fit is its best provider's. The page never re-ranks providers.
   copies. Any result (a card, a job line, a tile) opens that platform in the dashboard: directly
   for a member; otherwise sign-in first, the destination kept in localStorage for ten minutes and
   resumed by boot (`findResume`) however sign-in returns, and first-run onboarding leaves a
-  visitor on that platform rather than on Getting started. The server serves the new frontend here
-  to every visitor while the rollout is enabled (there is no legacy view of this page) and 404s
-  when the rollout switch forces legacy.
+  visitor on that platform rather than on Getting started. The server serves this page to every
+  visitor.
 
 **Analytics for finds** (PostHog through `track`, anonymous until sign-in, when the visitor's
 earlier events join the identified person): `search_opened` (`ref`: the landing's Tools link sends
@@ -1128,7 +1172,8 @@ hashes `index.html` and would not move when only the tutorial changed. Both are 
 includes the file by a bare path, so a browser that cached it before the header existed applies a
 heuristic lifetime and never revalidates, and an edited tutorial silently keeps serving the old
 steps. Consumed by **both** the dashboard Help view (native Vue
-render) and the **standalone** `src/treg/web/tutorial.html` (vanilla render, served at `/tutorial`;
+render; the Help chunk injects `/tutorial.js` and `/dashboard-tour/tour.js` before it renders, so no
+other Dashboard entry downloads them) and the **standalone** `src/treg/web/tutorial.html` (vanilla render, served at `/tutorial`;
 renders `steps` only) — so they can never drift. `docs/tutorial.html` is now a redirect to `/tutorial`;
 the prose walkthrough is `docs/TUTORIAL.md`. Editing steps means editing `tutorial.js` only.
 
@@ -1164,7 +1209,7 @@ only owners invite admins), `setRole` (owner-only dropdown), `removeMember`, `re
 (`leaveOrg`, `deleteOrg` — confirm-by-name). Destructive actions use **inline** two-step confirms
 (`confirmRemove`/`confirmLeave`/`confirmDel`), never native `confirm()`. `loadOrgAdmin` refreshes on
 `go('orgs')` + after each switch. The members table also shows each member's **`used_today`** + an inline
-**Daily cap** editor (`setCap` → `PATCH …/members/{id}/cap`; `-1` = unlimited), and every member (not just
+**Daily cap** editor (`setCap` → `PATCH …/members/{id}/cap`; `-1` = unlimited on the wire, shown as an empty "No limit" field, and clearing the field sends `-1`; the agent form's cap works the same), and every member (not just
 admins) sees a **"Your usage today: N / cap"** line from `loadMyUsage` (`GET /usage/me`) when a cap is set.
 The members table also carries the **per-member tool access control**: a **Tools** cell (`All` chip, or
 `N tools ▾` opening an inline checklist of every org tool — `openAccess`/`saveAccess` → `PATCH …/members/

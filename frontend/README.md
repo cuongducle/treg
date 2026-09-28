@@ -4,20 +4,21 @@ This app lives in the public treg repository and is served by the existing Pytho
 There is no separate production frontend server.
 
 - `src/App.vue`: application shell and conditional page/dialog mounts.
+- `src/views.ts`: pages and dialogs as on-demand chunks, with route preload and idle prefetch.
 - `src/pages/`: catalog, getting started, activity, tools, team, referrals and help.
 - `src/components/` and `src/dialogs/`: shared navigation and overlays.
+- `src/agent-setup/`: onboarding widgets shared with the standalone Enrich Arena page.
 - `src/state/`: existing Options API use cases, grouped by feature, plus initial state and boot.
 - `src/api.ts`: same-origin JSON transport, session expiry and edge-encoding behavior.
 - `src/styles/`: base styling. Redesign styles and artwork are shared from `src/treg/web/media/redesign/`.
 
 This is an incremental extraction. The old use cases still share per-application state through
-`state/context.ts`; their JavaScript and the shared onboarding widgets are not fully typed.
-New isolated components should use typed props and events. Existing hash navigation and deep links
-remain in the navigation/catalog/details modules; this change does not replace their URL contract.
-The deprecated, frozen rollback artifact lives in `src/treg/web/dashboard-legacy/` and exists
-only during rollout. `frontend/` is the only maintained Dashboard source. Do not backport features
-or routine fixes, or refresh the snapshot when syncing main. The server selects the frontend by
-authenticated user ID.
+`state/context.ts`; their JavaScript is not fully typed.
+New isolated components should use typed props and events. Register a new page or dialog in
+`src/views.ts`: a static import from `App.vue` puts it back into the entry chunk every visitor
+downloads. Existing hash navigation and deep links remain in the navigation/catalog/details
+modules; this change does not replace their URL contract.
+`frontend/` is the only Dashboard source: every entry, signed in or not, serves this compiled app.
 
 ## Develop
 
@@ -45,12 +46,17 @@ uv build
 Test behavior, not template source strings, CSS class names or component arrangement. Keep transport
 unit tests and HTTP rollout/packaging checks; use browser tests for user interactions.
 
-Browser tests start their own server on :18791 with a disposable database and no dotenv file.
+Browser tests start their own server with a disposable database and no dotenv file, on a port
+the OS reports free when the run starts, so parallel runs in other worktrees never collide
+(`TREG_E2E_PORT` pins one).
 They use full Chromium in headless mode so back/forward cache restoration is exercised.
 `PLAYWRIGHT_CHANNEL=chrome` can use an installed Chrome for local checks.
 
-Builds also copy the npm-installed Vue global runtime and license for standalone pages and the
-legacy snapshot; these generated files are packaged but never committed. Page runtime versions
+Builds also copy the npm-installed Vue global runtime and license for the standalone Arena page;
+these generated files are packaged but never committed. The onboarding widgets Arena shares with the
+Dashboard live in `src/agent-setup/`: the Dashboard imports them, and `vite.agent-setup.config.ts`
+compiles the same source into the generated `/agent-setup.js` classic script for Arena. The Dashboard
+bundles Vue's runtime only; do not add runtime `template:` strings or alias `vue` to its compiler build. Page runtime versions
 must match the npm lockfile. Three.js and Lenis on the landing page use pinned CDN URLs.
 
 Builds generate `src/treg/web/dashboard/`, which is ignored by Git and included in wheels/sdists.
@@ -58,45 +64,9 @@ Do not edit generated files. Distributable package builds fail if these assets a
 Python installs and background workers do not require Node. The Web build script is
 `scripts/build-web.sh`, which compiles the app and retains the locked Python installation.
 
-## Gradual rollout
+## Serving and rollback
 
-The homepage (`/`) uses the new landing page for all visitors; it has no experiment or rollout
-switch. The settings below apply only to the Dashboard, catalog and shared-link entries.
-Disabling Dashboard rollout does not revert the homepage.
-
-Production defaults to the frozen legacy Dashboard frontend. Configure the Web service:
-
-- `TREG_DASHBOARD_ROLLOUT_ENABLED=true` enables rollout; `false` forces legacy for everyone.
-- `TREG_DASHBOARD_ROLLOUT_USER_IDS='[123,456]'` is the JSON array of allowed numeric user IDs.
-- `TREG_DASHBOARD_ROLLOUT_PERCENT=0` starts with only the allowlist. Increase toward 100 to
-  include stable account buckets; email changes, team switches and browser changes do not reshuffle them.
-
-Anonymous visitors (including the public catalog and token-only browsers) stay on legacy.
-The one exception is `/search`, which exists only in this frontend: it is served to every visitor
-while rollout is enabled and returns 404 when rollout is disabled.
-After browser sign-in, the reload selects the account's frontend. All dashboard, catalog and
-shared-link entries use the same selection and private, no-store HTML. Frontend selection grants
-no API permissions. Legacy JavaScript is frozen under its own revision-qualified asset URLs.
-PostHog is not involved. Environment changes require a process restart/rolling deployment;
-rollback needs no frontend rebuild. Existing tabs switch on reload, and configuration changes
-also change the app-version stamp so open tabs can offer a refresh.
-
-The local dev script enables 100% for signed-in accounts by default. Override its rollout variables
-to rehearse production settings.
-
-## Retire the deprecated Dashboard
-
-Legacy is temporary, not a permanently supported version. Remove it in a follow-up change once
-the new Dashboard is validated at full account rollout and the release no longer needs the frozen
-fallback. Setting the percentage to 100 is not retirement: anonymous and token-only visitors still
-use legacy under the current policy.
-
-- Route every Dashboard entry to the compiled app, including anonymous catalog, shared links,
-  token-only entries and sign-in. Verify those flows and authenticated account flows in the browser.
-- Remove `src/treg/web/dashboard-legacy/`, `/app/legacy/assets/{path:path}`, the account-selection
-  branch, all three `TREG_DASHBOARD_ROLLOUT_*` settings and their app-version stamp inputs.
-- Remove obsolete rollout tests, local defaults and packaging checks; retain coverage for the
-  surviving entry routes, sessions and compiled assets. Update build/deployment documentation and
-  remove the retired settings from the private deployment configuration in a paired change.
-- Remove the deprecation instructions from `AGENTS.md` and context docs once removal ships.
-  Deployment rollback remains the recovery path after the in-process fallback is removed.
+The server hands every Dashboard, catalog and shared-link entry the same compiled `index.html`,
+as private, no-store HTML with `Vary: Cookie`. There is no in-process frontend switch: roll back a
+Dashboard change by deploying the previous build. Open tabs compare the app-version stamp in `/meta`
+and offer a refresh when a deploy changes the bundle.

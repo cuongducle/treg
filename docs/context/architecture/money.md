@@ -536,6 +536,11 @@ Provider-specific calculation stays outside the faithful relay.
 | Aviato | Fixed routes use the estimate; bulk enrichment counts successful records; catalog `settle: base` and `settle: modifiers` release documented-but-unbilled `reserve_only` riders |
 | Datagma | A finite nonnegative `creditBurn`, including numeric strings and zero, settles at that many frozen-price credits; invalid or absent evidence falls back to normal settlement |
 | ZeroBounce | The verified `per_success` adapter treats `status=unknown` as a zero-cost miss; other completed verdicts settle at the frozen one-credit estimate |
+| CompanyEnrich people search | Rows in `items[]`, floored at 1 (the documented 2-credit minimum on an empty page); each row is 2 credits (`_rows_billed_micro` scales `unit_micro` by the row's `cost.value`), capped at the reserved `pageSize` |
+| Icypeas bulk (`profile.url.bulk`, `people.identity.resolve.bulk`, `scrape.bulk`) | Rows in `data[]` whose `status` is `FOUND`; a company scrape (`type: "company"` in the request body) bills at 0.5 credit a hit, other bulk rows at 1 credit; `NOT_FOUND` rows are free |
+| Serpstat | An `error` envelope (bad token, exhausted limit, "Data not found") is free; otherwise rows in `result.data[]`, or `result.data.top[]` for `getKeywordTop`, floored at the documented 1-credit minimum on an empty list; any other response shape settles at the estimate |
+| TheCompaniesAPI companies search | `simplified=true` is free on endpoints that declare it in `input.queryParams`; otherwise one credit per company in `companies[]`, capped at the requested `size` |
+| Findymail employee search | One finder credit per contact in the returned list (`_rows_billed_micro`); an empty list is a free miss where the estimate used to bill the hold |
 
 Bright Data snapshot downloads are billable per result, including repeat downloads. Gzip or a
 buffer-truncated response falls back to the estimate because the record count is unknown.
@@ -680,8 +685,9 @@ still pay the provider twice.
   Neither a global nor an org-wide key safely separates independent callers.
 - A short application transaction claims a pending row before relay. The unique constraint
   arbitrates concurrent claims; the loser gets 409. Reusing a label with another fingerprint is 422.
-- Metered successes and partially charged routed failures retain status, body, charge and call id
-  for 24 hours. Uncharged failures, BYOK calls and owned free polls release the label immediately.
+- Metered successes retain status, body, charge and call id for 24 hours. Uncharged failures
+  (every routed failure since routed children defer their holds to the parent, catalog.md), BYOK
+  calls and owned free polls release the label immediately, so a retry tries again.
 - Replays return `X-Treg-Idempotent-Replay: true` and the original `X-Treg-Cost-Micro`;
   MCP returns `replayed: true`. An async submission replay repeats its original reservation.
 - Refusal and cancellation cleanup return an acquired label. Expired entries are swept lazily,
@@ -973,6 +979,19 @@ Profile-only LinkedIn enrichment reserves and settles 20,000 micro-USD when a pr
 misses remain free. Platform reveal search requires an explicit page size to bound its hold.
 Own keys are unmetered.
 
+## The hub seller's price (`earned`, `settle_to_in_transaction`)
+
+The tool hub (architecture/hub.md) adds one block kind and one primitive, and nothing else to
+the five entries. `earned` is a block kind like `promotional`: credit a maker's team received as a
+hub seller's price. It spends after the free kinds and before `purchased`. `settle_to_in_transaction`
+closes a hold on the payer and, in the same transaction, grants the settled amount to the payee as
+an `earned` block. `actual_micro=None` settles the full reserved amount (a flat price); a given
+`actual_micro` settles that much and refunds the rest of the hold to the payer (a variable hub
+price: the runner reserved the declared maximum and pays the real price, `docs/hub-pricing-decisions.md`).
+The entries: a `settle` entry on the payer whose meta names
+`payee_org_id`, and a `grant` entry on the payee whose meta names `payer_org_id` and the run. The
+invariant holds on both teams at every instant. It does not commit; the hub runner owns the
+transaction. It is the only cross-team money movement in treg.
 ## Top-up product attribution
 
 Manual checkout accepts optional product attribution independent of billing policy. `start_topup`
@@ -1021,6 +1040,31 @@ instead of raising. `_prospeo_cost_micro` settles bulk calls from finite nonnega
 single enrichments from endpoint-specific success evidence plus `free_enrichment`, searches from
 `free` and the result list, and suggestions at zero. Non-finite or malformed numeric evidence keeps
 the estimate for reconciliation. BYOK calls never enter this money path.
+
+## Apify dataset-row settlement
+
+An Apify `per_result` row on the platform key requires `maxTotalChargeUsd` (above 0, at most $1),
+the per-event spend cap Apify enforces; `maxItems` does not bind actors whose own input sets the row
+count. Only the run options `maxTotalChargeUsd`, `maxItems`, `memory` and `timeout` are accepted,
+each once and in plain ASCII, because a dataset-view option (`limit`, `offset`, `format`, `unwind`)
+would make the returned rows disagree with the events billed. `_marketplace_pricing` holds the cap
+plus `cost.call_fee`, the flat per-run charge: a start event the cap already counts, or run compute
+billed to the caller that it does not. An actor that bills its start per query names the body arrays
+that multiply the fee in `cost.call_fee_per` (LinkedIn jobs: job titles x locations). `_observed_cost_micro`
+settles the rows run-sync returned times the row price plus the fee; within two rows of the hold the
+caller's cap was reached, and the hold is the bill, because a run stops when its next event would
+pass the cap and can already have billed one event it never pushed and a plan-tier price below the catalog's fits more rows under the cap.
+Apify's `usageTotalUsd` trails a finished run by minutes, so it is not settlement evidence. A run
+that exceeds its own timeout, FAILS or is ABORTED answers 400 `run-failed` with no rows and releases,
+although Apify may have billed events up to the cap; so does an answer over the 8 MiB evidence limit.
+So does a caller who disconnects mid-run: the hold releases while the run keeps billing. The $1
+ceiling bounds each loss. That body names the run, so treg's Apify account must keep general
+resource access Restricted: with public access anyone could read the unbilled run's dataset by id.
+Settling such a run from its own event counts would need a deferred settle; `usageTotalUsd` lags. `timeout` is required and at most 90 seconds (and
+30 under `call_timeout_s`), because a run still going when Apify's 300-second synchronous wait,
+treg's upstream read timeout or the MCP client's 120 s ends leaves a failed call that releases
+unbilled while the run keeps billing. The cap must cover `call_fee` plus three rows, or the
+within-two-rows rule would bill an empty answer in full. BYOK calls never enter this money path.
 
 ## Pinned attribution and replay reads
 

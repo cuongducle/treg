@@ -40,7 +40,7 @@ export default {
                      aria-hidden="true" @error="platLogoBad[platSlug]=true">
                 <span v-else class="pt-i">{{platInitial({label:platLabel, slug:platSlug})}}</span>
               </span>
-              <h1>{{platLabel}}</h1>
+              <h1>{{platLabel || '\u00a0'}}</h1>
             </div>
             <p class="sub plat-intro">Every endpoint treg knows for this platform, one ledger, filed by subject — jobs several
               providers do sit on a single row, so you can compare price and coverage before you spend a call.</p>
@@ -103,7 +103,7 @@ export default {
                   <!-- EVERY row expands, merged or not: the row says what it does, the expansion
                        says how to call it, and which of the two a visitor needs is not something
                        the row shape can decide for them. -->
-                  <tr class="lrow" :class="{open:platOpen[r.key], go:r.ready}" @click="toggleRow(r)"
+                  <tr class="lrow" :class="{open:platOpen[r.key], go:r.ready, merged:r.kind==='merged'}" @click="toggleRow(r)"
                       :aria-expanded="!!platOpen[r.key]">
                     <!-- The flex lives on a wrapper INSIDE the cell, never on the <td>. A td with
                          `display:flex` stops being a table-cell: the browser wraps it in an

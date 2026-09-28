@@ -1,6 +1,6 @@
 [project]
 name = "tools-registry"
-version = "0.21.3"
+version = "0.22.0"
 description = "A remote registry that turns team skills into shareable, callable tools via a credential-injecting proxy."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -46,7 +46,8 @@ server = [
     "pyyaml>=6",   # the endpoint catalog's data files (src/treg/catalog/*.yaml) — server-side only
     "stripe>=12",  # balance top-ups (src/treg/infra/stripe.py) — the payment rail, server-side only
     "mcp>=2",      # the MCP front door (src/treg/mcp.py) — server-side only; pulls httpx2 ALONGSIDE
-    # httpx (they coexist), so the light CLI's dependency set is untouched
+    "quickjs>=1.19.4",  # the hub's script sandbox engine (src/treg/hub_sandbox.py) — server-side only
+                   # httpx (they coexist), so the light CLI's dependency set is untouched
     "redis>=5",    # the shared key-value store (src/treg/infra/kv.py) — server-side only
     "obstore>=0.11,<0.12",
 ]
@@ -252,6 +253,8 @@ asyncio_default_fixture_loop_scope = "session"
 # ModuleNotFoundError at collection. Say it here so both invocations agree, rather than adding
 # `scripts/__init__.py` and changing what the sdist thinks it contains.
 pythonpath = ["."]
+# Each OpenAPI operation needs its own id; bootstrap splits multi-method routes for the schema.
+filterwarnings = ["error:Duplicate Operation ID:UserWarning"]
 
 [build-system]
 requires = ["hatchling"]

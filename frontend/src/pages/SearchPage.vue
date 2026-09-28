@@ -84,7 +84,7 @@ export default {
     },
     cards(){ this.$nextTick(this.land); },
   },
-  created(){ this.els={}; this.slotAt={}; },
+  created(){ this.els={}; this.slotAt={}; this.dropTimers=[]; },
   mounted(){
     this.reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
     document.documentElement.classList.add('sp-lock');
@@ -116,6 +116,7 @@ export default {
     this.ro?.disconnect();
     cancelAnimationFrame(this.fieldRaf); this.field?.dispose();
     clearInterval(this.pokeTimer); clearInterval(this.scanTimer); clearTimeout(this.resizeTimer); clearTimeout(this.flungTimer);
+    this.dropTimers.forEach(clearTimeout);
     cancelAnimationFrame(this.scrollRaf);
     this.pile?.destroy();
   },
@@ -208,12 +209,13 @@ export default {
       this.floor=Math.round(this.tiles.length*size*size/((W<640 ? 1.1 : 0.62)*W) + size*0.8);
       this.pile.bounds(W, H);
       if(rebuild){
+        this.dropTimers.forEach(clearTimeout); this.dropTimers=[];
         this.pile.clear();
         const inPile=this.tiles.map(t=>t.key).filter(k=>!this.landed.includes(k));
         if(this.reduced || this.built){ inPile.forEach(k=>this.pile.add(k)); this.pile.settle(); }
         // An answer can land before the last tile has dropped (a shared ?q= link, a cached judge):
         // a tile already on its card is not dropped into the pile behind it.
-        else inPile.forEach((k,i)=>setTimeout(()=>{ if(!this.landed.includes(k)) this.pile.add(k); }, i*10));
+        else this.dropTimers=inPile.map((k,i)=>setTimeout(()=>{ if(!this.landed.includes(k)) this.pile.add(k); }, i*10));
         this.built=true;
       }
       this.$nextTick(()=>this.place(false));
@@ -298,7 +300,7 @@ export default {
 <div class="sp" :class="{answered:find.phase==='done' && cards.length}" ref="stage">
   <section class="sp-top">
     <div v-if="find.phase==='idle' || findBusy" class="sp-hero" :class="{quiet:findBusy}">
-      <span class="sp-count">{{platforms.length}} platforms · {{vendors.length}} providers<template v-if="toolCountText"> · {{toolCountText}} tools</template></span>
+      <span class="sp-count" :style="plats.settled ? null : {visibility:'hidden'}">{{platforms.length}} platforms · {{vendors.length}} providers<template v-if="toolCountText"> · {{toolCountText}} tools</template></span>
       <h1 class="hero-h1">What does your agent<br><span>need to do?</span></h1>
     </div>
 
@@ -399,7 +401,7 @@ html.sp-lock,html.sp-lock body{overflow:hidden;overscroll-behavior:none}
   --l-shadow-md:0 1px 2px -1px #0000000a,0 4px 6px -1px #0000000f;
   --l-shadow-lg:0 1px 2px -1px #0000000a,0 4px 6px -1px #0000000f,0 8px 16px #0000000a;--l-ease:cubic-bezier(.2,.72,.25,1);
   position:relative;display:flex;flex-direction:column;align-items:center;gap:18px;overflow:hidden;padding:88px 20px 0;box-sizing:border-box;
-  min-height:520px;background:var(--l-bg);color:var(--l-ink);font-family:"Suisse Intl","Inter","Segoe UI",system-ui,sans-serif}
+  min-height:520px;background:var(--l-bg);color:var(--l-ink);font-family:var(--sans)}
 /* The landing hero's soft green light, under its glyph field. */
 .sp::before{content:"";position:absolute;inset:0 0 auto;height:75%;pointer-events:none;z-index:0;
   background:radial-gradient(ellipse at 50% 20%,#dce8d585,transparent 65%)}

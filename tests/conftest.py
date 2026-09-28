@@ -7,6 +7,8 @@ The `clients` fixture also registers a user and authes the client by default.
 
 from __future__ import annotations
 
+import atexit
+import glob
 import os
 import socket
 import tempfile
@@ -16,19 +18,50 @@ os.environ["TREG_TELEMETRY"] = "0"
 
 # Isolate the test DB from any .env / running dev server BEFORE importing treg (the engine is
 # built at import time). A real env var overrides the .env file in pydantic-settings.
-# TREG_TEST_DB_URL (not TREG_DATABASE_URL — a stray production URL in a shell must never become the
-# test target) lets two suites run side by side: `reset_db()` DROPS tables, so two concurrent runs
-# against the same sqlite file tear down each other's schema mid-test.
-# Under pytest-xdist each worker process gets its OWN file (gw0, gw1, …) — twelve workers against
-# one sqlite file drop each other's tables mid-test (1,022 errors on the first parallel run). An
-# explicit TREG_TEST_DB_URL wins untouched, for single-process runs against something specific.
+# TREG_TEST_DB_URL (not TREG_DATABASE_URL - a stray production URL in a shell must never become the
+# test target) points the suite at a specific database, e.g. the Postgres CI job.
+# Otherwise every test process gets its OWN sqlite file, named by pid: processes sharing one file
+# wipe each other's rows mid-test, whether they are xdist workers of one run (1,022 errors on the
+# first parallel run) or two runs started side by side in one checkout.
 _worker = os.environ.get("PYTEST_XDIST_WORKER", "")
 # The files live under the system temp dir, NOT the repo root: sixteen 600 KB databases rewritten
 # on every run kept editors' file watchers busy re-indexing the working tree.
 _db_dir = os.path.join(tempfile.gettempdir(), "treg-tests")
 os.makedirs(_db_dir, exist_ok=True)
-_default = f"sqlite+aiosqlite:///{_db_dir}/treg-test{'-' + _worker if _worker else ''}.db"
-os.environ["TREG_DATABASE_URL"] = os.environ.get("TREG_TEST_DB_URL", _default)
+_db_file = os.path.join(_db_dir, f"treg-test-{os.getpid()}.db")
+atexit.register(lambda: [os.remove(p) for p in glob.glob(_db_file + "*")])
+_default = f"sqlite+aiosqlite:///{_db_file}"
+
+
+def _per_worker_postgres(url: str) -> str:
+    """An xdist worker against Postgres gets its own database (treg_test_gw0, ...), created on first
+    use: `reset_db()` empties every table, so workers sharing one database wipe each other's rows."""
+    import asyncio
+    import asyncpg
+    from sqlalchemy.engine import make_url
+
+    base = make_url(url)
+    name = f"{base.database}_{_worker}"
+
+    async def ensure() -> None:
+        dsn = base.set(drivername="postgresql").render_as_string(hide_password=False)
+        conn = await asyncpg.connect(dsn)
+        try:
+            if not await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", name):
+                await conn.execute(f'CREATE DATABASE "{name}"')
+        finally:
+            await conn.close()
+
+    asyncio.run(ensure())
+    return base.set(database=name).render_as_string(hide_password=False)
+
+
+_test_db_url = os.environ.get("TREG_TEST_DB_URL")
+if _test_db_url and _worker and _test_db_url.startswith("postgresql"):
+    # Resolved once per process: tests that import `tests.conftest` load this module a second time.
+    _test_db_url = os.environ.get("TREG_TEST_DB_URL_WORKER") or _per_worker_postgres(_test_db_url)
+    os.environ["TREG_TEST_DB_URL_WORKER"] = _test_db_url
+os.environ["TREG_DATABASE_URL"] = _test_db_url or _default
 # Replica tests opt in explicitly; never inherit a real replica from the shell or .env.
 os.environ["TREG_READ_DATABASE_URL"] = ""
 os.environ["TREG_EMAIL_DEV_MODE"] = "true"  # tests need the returned OTP code (prod default is now False)
@@ -75,6 +108,7 @@ from treg.api import app  # noqa: E402
 from treg import archive  # noqa: E402
 from treg.config import get_settings  # noqa: E402
 from treg.infra.db import reset_db  # noqa: E402
+from treg.domain.identity import api_keys as managed_keys  # noqa: E402
 
 
 # The OTP-start + sandbox throttles (and the OTP codes) now live in the DB's `ephemeral` table, not in
@@ -363,6 +397,24 @@ async def verified_signup(client, *, json, headers=None):
         json={**response.json(), "id": user_id, "email": email}, request=response.request)
 
 
+async def funded_user(client, email, *, micro=1_000_000):
+    """A per-org token whose team holds money.
+
+    `POST /users` is legacy registration: the user it mints is UNVERIFIED, and the signup credit is
+    now verified-only (`claim_signup_promo`), so that team starts at zero. A test that has to PAY
+    for something funds the team here instead of leaning on a promo that no longer arrives.
+    Returns the whole registration body, so `["token"]` and `["org_id"]` both work.
+    """
+    from treg.domain import money
+    from treg.infra.db import session_maker
+
+    body = (await client.post("/users", json={"email": email})).json()
+    async with session_maker() as db:
+        await money.grant(db, body["org_id"], amount_micro=micro, kind="promotional")
+        await db.commit()
+    return body
+
+
 async def drain_background_writes():
     # Postgres needs a session-scoped event loop so asyncpg can safely pool connections. That also
     # lets fire-and-forget audit writes survive between tests, so drain both sides of reset_db():
@@ -373,6 +425,10 @@ async def drain_background_writes():
     # forgives it) — the serial CI job hung exactly here, 5-minute faulthandler timeouts on
     # whichever archive test ran next (2026-08-28, twice).
     await archive.drain()
+    # And the managed-key last-used writer: ids restart with every reset_db(), so a write or a
+    # throttle claim left over from one test would land on, or suppress, the next test's key.
+    await managed_keys.drain_last_used()
+    managed_keys._last_used_claims.clear()
 
 
 @pytest.fixture
@@ -407,14 +463,17 @@ def _reset_call_path_caches():
     def _clear() -> None:
         try:
             from treg.domain.capacity.view import view as capacity_view
-            capacity_view.invalidate(); capacity_view._states = {}; capacity_view._locks = {}
+            capacity_view.invalidate()
+            capacity_view._states = {}
+            capacity_view._locks = {}
             from treg.domain.capacity import marks as capacity_marks
             capacity_marks._last_probe.clear()
         except ImportError:
             pass
         try:
             from treg.domain.capacity.routes_view import view as routes_view
-            routes_view.invalidate(); routes_view._routes = []
+            routes_view.invalidate()
+            routes_view._routes = []
         except ImportError:
             pass
         try:
@@ -426,6 +485,9 @@ def _reset_call_path_caches():
         # with every reset_db(), so a counter left over would ration the NEXT test's team.
         from treg.infra import kv
         kv._store = None
+        # Who a key is, for the hub's lists: remembered a minute, and keys repeat across resets.
+        from treg.routers import hub_gate
+        hub_gate._readers.clear()
     _clear()
     yield
     _clear()
@@ -484,3 +546,21 @@ def contactout_platform(monkeypatch):
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+_SESSION_CWD = os.getcwd()
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_teardown(item, nextitem):
+    """Every test ends in the directory the run started in. A test that changes it (a bare
+    `os.chdir`, or product code that chdirs while a stub stands in for `exec`) makes later tests
+    fail on relative paths, far from the cause and only in some orders. Runs after every fixture
+    has torn down, so `monkeypatch.chdir` restores first; the leaking test errors here instead."""
+    result = yield
+    if os.getcwd() != _SESSION_CWD:
+        leaked = os.getcwd()
+        os.chdir(_SESSION_CWD)
+        raise AssertionError(f"{item.nodeid} left the working directory at {leaked}; "
+                             "use monkeypatch.chdir so it is restored")
+    return result

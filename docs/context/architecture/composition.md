@@ -34,7 +34,7 @@ The standalone [Enrich Arena](../interface/enrich-arena.md) pages (`/enrich-aren
 `/enrich-arena/leaderboard`) and `/arena/*` routes are control-role
 surfaces. Paid interactive runs use the ordinary call application internally. Shutdown drains their
 in-process owners before closing the shared upstream client.
-The shared `/agent-setup.js` browser asset and the compiled Dashboard assets at
+The `/agent-setup.js` browser asset (compiled from the Dashboard source for Arena) and the compiled Dashboard assets at
 `/app/ui/assets/{name}` also belong to the control role.
 
 `bootstrap.create_app(role)` is the FastAPI composition root. `api.py` hosts the ordered route table,
@@ -44,7 +44,7 @@ EOF so the deployed `treg.api:app` import path remains the default `all` role.
 The factory owns concrete assembly: the three core pure-ASGI middleware registrations, the optional
 V2 path normalizer, five exception handlers, static mounts, optional MCP mounts and lifespans,
 GET-to-HEAD widening, the OpenAPI wrapper that hides
-implied HEAD operations, shared HTTP client creation, startup work, shutdown drains, and the Ads
+implied HEAD operations and gives each method of a multi-method route its own operation id, shared HTTP client creation, startup work, shutdown drains, and the Ads
 conversion worker. Registration order is compatibility behavior. The four stage-0 snapshots stay
 byte-identical for `role="all"` unless that composition intentionally changes.
 
@@ -53,6 +53,8 @@ verification, then owns the asynchronous client until archive and analytics drai
 conditional resource setup does no object I/O at startup and adds no worker. Tests can supply
 `create_app(..., archive_object_store=...)`; `configure_archive_object_store` is the shared
 in-memory injection seam. See [archive](archive.md) for switches and queue behavior.
+The same `archive_object_store` context owns the client for the Arena insights worker; that command
+does not start a web lifespan or its background tasks.
 
 For every role, the factory wires the Catalog observation port to one process-local
 `CachedEndpointObservationReader` backed by short `background_session_maker` reads — the cache never
@@ -152,6 +154,12 @@ otherwise change route inspection and the committed surface snapshot.
 
 Public routes added since: `/{INDEXNOW_KEY}.txt` (`indexnow_key`, `routers/web.py`) — the IndexNow
 key file; listed in the ownership table beside `/sitemap.xml`. See `interface/seo.md` § IndexNow.
+
+The [tool hub](hub.md)'s management and browse surface (`/hub/tools*`, `/hub/run`, `/hub/runs/{run_id}`,
+`/hub/{tool_id}`, `/app/runs/{run_id}`, and the `/admin/hub/listings*` + `/admin/hub/updates*` review
+routes) joins `_CONTROL_ROUTE_KEYS` alongside the rest of the management surface; `/call/` and
+`/catalog/call/` remain the only dataplane routes a hub run's own steps go through. The legacy
+dashboard's `/app/legacy/assets/{path:path}` mount is gone — see [dashboard](../interface/dashboard.md).
 
 No web process collects Arena statistics any more: `treg-worker arena insights` (a cron) does,
 and `/arena/insights`, a control route, only reads the last published snapshot. `ROLE_BACKGROUND_TASKS`

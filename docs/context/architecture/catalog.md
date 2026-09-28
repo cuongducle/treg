@@ -92,7 +92,6 @@ sources:
   - src/treg/catalog/akta.extended.yaml
   - src/treg/catalog/dataforseo.yaml
   - src/treg/catalog/dataforseo.extended.yaml
-  - tests/test_dataforseo_constraints.py
   - src/treg/catalog/scrapecreators.yaml
   - src/treg/catalog/scrapecreators.extended.yaml
   - src/treg/catalog/serpapi.yaml
@@ -406,10 +405,10 @@ pages therefore render as flat model walls; the same model reachable over severa
 direct, OpenRouter, Replicate all serve Hailuo) sits adjacent under model-led names, which is the
 comparison that actually means something. The per-model capability is the join key that lets those
 routes merge onto one row if that comparison is later curated. reAPI and PiAPI are the first pair
-to share join keys on purpose: both files propose `video-gen.seedance-2-5.generate`,
+to share join keys on purpose: both files use `video-gen.seedance-2-5.generate`,
 `video-gen.seedance-2-5-unrestricted.generate`, `image-gen.gpt-image-2-5.generate`,
-`image-gen.gpt-image-2.generate` and `image-gen.gemini-3-pro-image.generate`, so the two routes to
-one model sit on one row with their prices side by side. The `-unrestricted` key names the Less Restriction route (reAPI `content_filter: false`, PiAPI's `seedance-2.5-less-restriction` task): the
+`image-gen.gpt-image-2.generate` and `image-gen.gemini-3-pro-image.generate` (shared keys, so they
+live in capabilities.yaml), so the two routes to one model sit on one row with their prices side by side. The `-unrestricted` key names the Less Restriction route (reAPI `content_filter: false`, PiAPI's `seedance-2.5-less-restriction` task): the
 only route on which a real person's photo is accepted as the subject reference, which is the whole
 reason those resellers are listed beside the official-rate OpenRouter route. OpenRouter's Seedance 2.5
 is curated into `openrouter.yaml` on the same join key (its generated extended twin is therefore
@@ -440,12 +439,23 @@ Rules:
 - A capability id is dot-delimited, lowercase; the FIRST segment is its platform slug.
 - Ids name the *job*, not the provider's endpoint ("get user profile", not "fetch_user_profile_v2").
 - Adding a capability = adding it here. Provider files may carry `proposed_capabilities:` (same
-  mapping shape) when curation discovers a job the taxonomy lacks; the reviewer merges them into
-  this file. The validator accepts a capability that is either global or proposed in the same file.
+  mapping shape) when curation discovers a job the taxonomy lacks. A proposal is live the moment it
+  loads (the loader merges it into the taxonomy, first file by name wins the description), so the
+  validator keeps it a staging area: an endpoint may use a capability that is global or proposed in
+  its own file; a proposal that repeats a capabilities.yaml id, or one id proposed with different
+  descriptions in different files, is an error; and a proposal that endpoints of two providers use
+  is a warning to promote it here, deleting it from every provider file.
+- One job, one id. Two ids of one platform with the same description are a validator warning: they
+  split one comparison row in two. Rename the losing id on its rows (endpoint ids do not change) and
+  check `contracts.yaml` and `adapters.yaml`, which are keyed by capability. Count-only search
+  variants are `<platform>.search.count`, lookalike search is `companies.similar`.
 - Under `AI generation`, platform means the generated-media modality rather than a system that owns
-  the data. The frozen vocabulary is `video-gen.from_text`, `video-gen.from_image`,
-  `video-gen.task.status`, `image-gen.from_text`, `image-gen.edit`, and `voice-gen.from_text`;
-  text-to-video and image-to-video stay separate because their required inputs and prices differ.
+  the data. The job-level `video-gen.from_text`, `video-gen.from_image`, `image-gen.from_text`,
+  `image-gen.edit` and `voice-gen.from_text` are deliberately memberless (see "Two tiers"
+  above and the capabilities.yaml header): rows carry per-model capabilities such as
+  `video-gen.hailuo.from_text`, and a model joins a job-level row only as a hand-picked editorial
+  choice. Text-to-video and image-to-video stay separate because their required inputs and prices
+  differ.
 
 ### `<service>.yaml`
 
@@ -497,6 +507,25 @@ endpoints:
     example_response: examples/tikhub.tiktok.user.profile.json   # written by catalog_verify.py
     docs_url: https://docs.tikhub.io/…
 ```
+
+### Domain sections — grouping endpoints for browse
+
+`catalog_store._domain` derives the `domain:` heading above (capability middle segment, else a path
+keyword, else the path's grouping segment, else `other`) by splitting the candidate into whole words —
+on non-letters and camelCase humps, via `_WORDS = re.compile(r"[A-Z]?[a-z]+")` — then matching against
+`DOMAIN_KEYWORDS`. A short key (`ads`, `llm`, `ad_`→`ad`) must match a whole word; a stem key
+(`keyword`→`keywords`, `backlink`→`backlinks`, `shop`→`shopping`) matches by prefix. This keeps `ads`
+from matching inside `leads` or comment**threads**, and `user` from matching inside `abuser`reports.
+`DOMAIN_NOISE` drops vendor-internal path segments that would otherwise earn their own heading:
+brand-family markers (`dataforseo_labs`, `appendix`) and delivery-version markers (`web_v2`, `web_v3`,
+`web_v4`).
+
+Some brand-family or version headings come from a capability id's own middle segment rather than a
+path segment, so `DOMAIN_KEYWORDS`/`DOMAIN_NOISE` cannot filter them — `google-analytics`'s
+`measurement_protocol_secret` / `google_ads_link` / `firebase_link`, `x`'s `account_activity`, or
+`douyin`'s `xingtu` / `xingtu_v2`. Renaming those reads as a `capabilities.yaml` taxonomy edit, not a
+heuristic change; open renames are tracked in
+[catalog-review-proposal.md](../interface/catalog-review-proposal.md).
 
 ### Async descriptors
 
@@ -659,10 +688,9 @@ prices are explicitly unknown, while the curated core rows carry per-model page 
 ingesters sort their inputs and produce byte-identical output when upstream data is unchanged.
 
 Utility capability names still describe the utility's actual job. OpenRouter model discovery uses
-the file-local proposed `video-gen.models.list`; OpenRouter and MiniMax content retrieval use the
-proposed `video-gen.result.retrieve`; only polling uses the frozen `video-gen.task.status`. These
-rows remain hidden management plumbing because `kind: utility`, and proposed capabilities avoid
-expanding the global generation vocabulary merely to satisfy the core-row capability requirement.
+the file-local proposed `video-gen.models.list`; OpenRouter and MiniMax content retrieval share
+`video-gen.result.retrieve`; polling uses `video-gen.task.status`. These rows remain hidden
+management plumbing because `kind: utility`.
 
 ### `<service>.extended.yaml`
 
@@ -886,11 +914,13 @@ against every row's maximum computable price. A `times` value outside the field'
 (or non-finite, or non-positive) matches no row and prices at the
 fallback, so a request cannot reserve zero or bill past the ceiling. With `settle: table`, the
 matched row is reserved and settled (fallback when unmatched). With `settle: usage`, the matched
-row is reserved as the rate-card estimate and the terminal `usage.path` figure settles, which may
-exceed the reserve (OpenRouter's unpublished minimums); `settle: usage` therefore requires an async
-descriptor, exactly a dotted `usage.path` and a supported `usage.unit` (`usd`; `credit` when
-fx.yaml prices that provider's credit; or a provider-native meter with a numeric
-`unit_rates_usd[provider][unit]` entry), and `settle: table` rejects a stray usage block. A `times`
+row is reserved as the rate-card estimate and the reply's `usage.path` figure settles (the
+terminal document on an async row, the buffered body on a synchronous one), which may exceed the
+reserve (OpenRouter's unpublished minimums). A flat `value` may also declare `settle: usage` with
+no table: its explicit `fallback` is the reserve. Either form requires exactly a dotted
+`usage.path` and a supported `usage.unit` (`usd`; `credit` when fx.yaml prices that provider's
+credit; or a provider-native meter with a numeric `unit_rates_usd[provider][unit]` entry), and any
+other settle rejects a stray usage block. A `times`
 value is never non-positive, whatever minimum the field declares, so a field that admits a sentinel
 such as `-1` cannot multiply a rate by it; the sentinel is priced by a flat row that pins it, and
 that row is left out of the advertised per-second rate span. The money fragment describes the settlement itself.
@@ -953,7 +983,10 @@ ceiling. A finite nonnegative response value settles the call at that amount; mi
 non-finite evidence falls back to the normal estimate/miss rules. `reported_charge` is generic
 catalog metadata, not a provider-specific billing branch, and cannot be combined with `cost.settle`.
 
-`platform_request` fixes exact body values needed only on the shared credential. Provider-specific
+`platform_request` fixes exact body, header or query values needed only on the shared credential.
+A `queryParams.*` pin must appear exactly once and is read as the pinned value's type, so a run
+option such as a spend cap or memory size can bound what one call costs. An Apify `per_result` price may add
+`call_fee`, the flat per-run charge settled with its counted rows (money.md, Apify dataset-row settlement). Provider-specific
 request guards bound shapes whose billing formulas need more context than an exact selector:
 Openmart requires its explicit 1-25 record count, while Tavily Map and Crawl require an explicit
 integer limit from 1 to 20. Resolution applies these only after selecting the platform offer and
@@ -1681,7 +1714,8 @@ and the CLI so the three surfaces cannot disagree:
   `people.search` is "lead lists and prospects (sales leads)" — not to bend the scorer; `aliases.yaml`
   then only needs `lead → leads`, `prospect → leads, prospects`.
 - **A group shows its best `MAX_ROUTED_CHILDREN` (5) children.** One capability's 24 providers had
-  eaten the whole 25-row page. The parent is stamped `children_hidden`; the CLI prints
+  eaten the whole 25-row page. An approved hub tool of the same job (`kind: "hub"`) sits in the
+  group but is never cut: the router does not list it. The parent is stamped `children_hidden`; the CLI prints
   `+ N more providers — treg catalog get <parent>`, MCP says so in `routed`. To keep the page full
   after collapsing, search ranks a band of 4× the page (≤ 100) and cuts to `limit` AFTER grouping.
 
@@ -1708,6 +1742,11 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   admission-only contract: its adapters verify like any other (which is what the archive's
   `has_result_rules` reads), but no `treg.<capability>` row is ever generated from it. For a
   capability whose "children" are one provider's price tiers, not a choice treg should make.
+  `scoping` names identity keys that scope the answer rather than describe it (`people.search`:
+  `company_domain`). A candidate whose adapter never sends one the caller supplied is dropped from
+  the plan with the reason, not ranked down like an ignored filter: a title-only search asked for
+  one company's CEO returns title-matched strangers for any company and bills them as a hit. The
+  rule is per candidate, so `{q, company_domain}` also drops the `q`-only providers.
 - **Adapters** — `adapters.yaml`, one per endpoint: `accepts` (identity variants), `in` (contract
   field → `queryParams.x` / `body.x`), `const` (fixed provider params), `out` (core field →
   expression over the body), `miss`. The expression language (`domain/catalog/routing/paths.py`)
@@ -1736,7 +1775,9 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   extra never disables the primary.
 - **The generated row** — `routing/synthetic.py`: every capability with ≥ 2 verified children gets
   `treg.<capability>` (`store.load` skips a `routed: false` contract) (`provider: treg`, `kind: routed`, `POST /<capability>`, `input` = the
-  contract, `cost` = the children's range, `routed_children`). Never hand-written; not in any
+  contract, `cost` = the children's range, `routed_children`, `miss_billed_by` = the children priced
+  per call or per result, whose provider bills an answer treg judges a miss: the caller pays those
+  too, and the cost note says so). Never hand-written; not in any
   provider file.
   `catalog_get` on it returns the contract and the ranked **plan** (the quote) —
   nothing is reserved.
@@ -1746,9 +1787,11 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   is the measured hit rate when ≥ 20 decided samples exist, else `ok_rate`, else 1.0 (flagged
   `unmeasured`). `build_plan` reads that evidence through bootstrap's shared process cache; cold or
   unavailable observations degrade to unmeasured ranking while the cache refreshes off the request
-  path. `X-Treg-Route-Prefer` / `-Exclude` override; exhausted providers (capacity view)
-  and providers with no key on the deployment are dropped and named in `dropped` (`needs {…}`
-  says which identity variant a dropped child wanted).
+  path. `X-Treg-Route-Prefer` / `-Exclude` override. An exhausted platform provider with an enabled
+  overflow route remains a candidate at the overflow route's price, so the ordinary child ladder can
+  skip the known-dry direct account and use the aggregator; without an enabled route it is dropped.
+  Providers with no key on the deployment are also dropped and named in `dropped` (`needs {…}` says
+  which identity variant a dropped child wanted).
 - **Execution** — `application/call/route.py`, entered from `service._execute_call` when the
   resolved catalog row is `kind: routed`. Each attempt is a **full child `execute_call`** on a
   `CallContext` whose `call_ref` is `{parent}:r{n}` — its hold id, ladder (tiers 1/2/4/overflow),
@@ -1759,7 +1802,11 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   since 2026-09-07 a per_call rejection settles only at a charge the vendor itself reports, so this
   is a bound on the reported-charge risk, not on the estimate — see money.md)
   — never the same provider again, within the error bound; if every one rejects it, the caller
-  gets `route_caller_fault` naming each attempt. A 4xx the endpoint's YAML declares as its
+  gets `route_caller_fault` naming each attempt. When another provider already ANSWERED the same
+  question (a hit, weak hit or miss), the question is valid and the 4xx is that provider's own: it
+  is recorded as `rejected` and the waterfall goes on like any provider error, so the rows already
+  answered are still returned (live 2026-09-23: prospeo's 400 after two answers ended a
+  people.search as the caller's 400). A miss plus `rejected` attempts ends as a 200 miss. A 4xx the endpoint's YAML declares as its
   "no result" status (`miss: {status: 404}` or `miss: {status: 400, when: …}`, see "`miss`
   semantics ride on the endpoint") is a MISS instead, not a fault. An adapter method
   (`to_upstream`, `from_upstream`, `is_miss`) that throws is recorded as an error attempt and the
@@ -1775,8 +1822,16 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   under a 20000 envelope). A
   MISS tries the next candidate — the waterfall is ON by default (decided
   2026-08-28: the endpoint's job is to find the thing, and misses on the per-success children are
-  free); `X-Treg-Route-Waterfall: 0` stops at the first miss. Every attempt is settled at its real
-  price and `X-Treg-Route-Max-Cost` (default $1) bounds the sum before each reserve (a candidate
+  free); `X-Treg-Route-Waterfall: 0` stops at the first miss. **A child never settles its own
+  hold**: it leaves it open in the parent's `deferred_settles` list (`settle.DeferredSettle`) with
+  the amount its settle would charge, and `run_routed` closes every one exactly once at the end
+  (`settle.close_deferred`, one transaction): settled at that real price when the routed call
+  answers (a hit or a 200 miss), RELEASED when it fails (`route_failed`, `route_caller_fault`,
+  `route_max_cost`, a balance refusal, a cancellation). A routed call that fails therefore charges
+  nothing (owner decision 2026-09-21): its error detail says `charged_micro: 0` and
+  `released_micro` names what the providers billed treg. A crash between the two leaves the holds
+  to the reaper, which releases in the caller's favour. `X-Treg-Route-Max-Cost` (default $1)
+  bounds the sum before each reserve (a candidate
   that would breach it is `skipped`). Quota-row quotes scale with the requested row count, just
   like per-result quotes. Each child also receives the remaining ceiling after actual earlier
   charges; the shared reservation gate checks the resolved estimate including margin, even when
@@ -1789,8 +1844,8 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   Response: `{output, raw, _treg: {served_by, provider, tier,
   outcome, tried[], charged_micro, capped?}}`, `X-Treg-Served-By`, `X-Treg-Providers-Tried`,
   `X-Treg-Route-Outcome`, `X-Treg-Route-Capped?`, `X-Treg-Cost-Micro` = the sum, one `X-Treg-Call-Id`. The parent owns
-  the idempotency label (a success, or a terminal failure after a paid child, replays without
-  touching a provider) and writes one audit row
+  the idempotency label (a success replays without touching a provider; a failure now costs
+  nothing, so it is not stored and a retry with the same key tries again) and writes one audit row
   (`credential_tier: routed`) beside the children's.
   An async child uses the shared async bridge to submit once and poll through ordinary authenticated
   child calls. The final poll response, not the kickoff response, is passed to the adapter. Routed

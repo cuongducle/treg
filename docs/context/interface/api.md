@@ -24,7 +24,7 @@ sources:
   - src/treg/application/call/types.py
   - src/treg/infra/upstream/relay.py
   - src/treg/application/connect.py
-  - src/treg/application/onboard.py
+  - src/treg/application/onboard/__init__.py
   - src/treg/application/referrals.py
   - src/treg/application/signup.py
   - src/treg/routers/__init__.py
@@ -327,8 +327,8 @@ validated before resolving the shared HTTP client. `/auth/logout` remains an HTT
   itself ran that journal count - 2.8 s per call for a member with 110k rows that day.
 - **Super-admin (cross-tenant, `require_superadmin`):** `/admin/stats|orgs|orgs/{id}|users|tools|calls|
   errors|health` (reads - `errors` is failed calls across every credential tier with captured,
-  admin-only request/response evidence, supports a `tier` filter, and runs the 14-day retention pass;
-  see [super-admin](../architecture/super-admin.md))
+  admin-only request/response evidence, supports a `tier` filter, and withholds evidence past the
+  14-day retention window, which the `treg-worker admin purge-evidence` cron blanks; see [super-admin](../architecture/super-admin.md))
   + `/admin/users/{id}/superadmin|suspend`, `DELETE /admin/users/{id}`,
   `/admin/orgs/{id}/suspend`, `DELETE /admin/orgs/{id}` (Phase-2). See
   [super-admin](../architecture/super-admin.md).
@@ -389,8 +389,9 @@ validated before resolving the shared HTTP client. `/auth/logout` remains an HTT
     virtual-memory cap crashes Go CLIs (gh/stripe/doctl) and `RLIMIT_NPROC` is per-uid, shared with the
     server. Full **filesystem/network** isolation needs a container deploy and is a planned follow-up.
 - **Meta:** `meta` (`GET /meta`, open) → `{public_url, github, google, app_version, treg_version,
-  posthog_key/posthog_host, intercom_app_id, referral}` for the dashboard. `referral` carries the
-  two configured reward amounts so the top-bar entry can name them without `GET /referrals`. The last three are the opt-in
+  posthog_key/posthog_host, intercom_app_id, hub, referral}` for the dashboard. `referral` carries the
+  two configured reward amounts so the top-bar entry can name them without `GET /referrals`. `hub`
+  is `TREG_HUB_ENABLED`, so the dashboard asks no hub route that could only answer 404. The last three are the opt-in
   third-party keys (analytics, support chat): empty on a deployment that didn't set them, so
   self-hosted pages load neither PostHog nor the Intercom Messenger. `intercom_app_id` is paired
   server-side with `intercom_secret`, which never leaves the server: `_intercom_user_hash` (HMAC-SHA256
@@ -406,7 +407,7 @@ validated before resolving the shared HTTP client. `/auth/logout` remains an HTT
   |---|---|
   | `GET /catalog/platforms` | Non-empty platforms with capability/endpoint counts and providers, ordered by endpoint count; `providers` names every browsable vendor |
   | `GET /catalog/platforms/{slug}` | Capabilities, extended endpoints, dashboard domain rows and provider metadata; unknown slug is 404 |
-  | `GET /catalog/search?q=&limit=` | Ranked endpoint views, count/total and hints; default 25, maximum 100 |
+  | `GET /catalog/search?q=&limit=` | Ranked endpoint views, count/total and hints; default 25, maximum 100. Listed hub tools merge into the same ranking by score (see [hub](../architecture/hub.md)); a hub row's run hint is its own `treg call <id> --data` line, since it has no catalog row or provider key |
   | `GET /catalog/find?q=` | Find tools for a described job: NDJSON stream of `candidates` then `judged` (verdict + kept rows with probabilities; a bare platform or provider name gets verdict `name` and its endpoints, unjudged); rate limited per IP, 503 without a judge key |
   | `GET /catalog/endpoints/{id}` | Endpoint, provider, capability siblings, call template, inline example and next-step hints; `overflow_price_usd` / `overflow_price_unit` / `overflow_via` on the endpoint when the deployment can relay it |
   | `GET /catalog/examples/{id}` | Captured JSON, resolved through the catalog before constructing a file path |
@@ -519,7 +520,7 @@ validated before resolving the shared HTTP client. `/auth/logout` remains an HTT
   `/skill.md`, so `{BASE}` templates to the **serving** host and a self-hosted registry advertises
   itself. See [skill.md](skill.md) for the other three distribution doors.
   `terms_page` (`GET /terms`) + `privacy_page` (`GET /privacy`) serve the hosted registry's legal pages
-  (`_legal_page`, no-cache) with `legal_css` (`GET /legal.css`) as the shared skin - `/privacy` is also
+  (`_static_page`: `{BASE}` and the catalog counts filled, no-cache with an ETag) with `legal_css` (`GET /legal.css`) as the shared skin - `/privacy` is also
   the URL given to OAuth providers at app-verification time, so don't rename it.
   `resources_page` (`GET /resources`) is the hub for the outcome pages and the **only** thing linking to
   them: the landing footer and each page's own footer carry one `resources` link rather than five that grow
@@ -536,6 +537,9 @@ validated before resolving the shared HTTP client. `/auth/logout` remains an HTT
   the generator refuses to emit anything past the ad-kit heading so bid and negative keywords cannot
   reach a public page. Provider brand marks are
   mounted at `/logos` (`StaticFiles` over `web/logos/`, resolved by convention `logos/<service>.svg`).
+  Page media is mounted at `/media` (`_MediaStatic` over `web/media/`): the names are unversioned, so
+  scripts, stylesheets and text answer `no-cache` (revalidated through the ETag, never a heuristic
+  lifetime that would pair old code with new HTML) and images, video and fonts `public, max-age=86400`.
   `dashboard_marketplace` (`GET /app/marketplace/{service}`) serves the plain SPA (a connect page is only
   meaningful to a signed-in member, so no OG meta).
   `_serve_md` backs `quickstart_md` (`GET /quickstart.md`) + `tutorial_md` (`GET /tutorial.md`) -
@@ -701,6 +705,12 @@ validated before resolving the shared HTTP client. `/auth/logout` remains an HTT
   `_resolve_call`, so an exact same-named team tool cannot shadow the catalog endpoint. From the
   credential ladder onward it delegates to `call_tool`, retaining provider/user credentials, ACLs,
   deny rules, caps, metering, audit, idempotency and faithful relay.
+
+  `_execute_call` (`application/call/service.py`) tries an own tool, then a catalog endpoint, then —
+  only when both 404 — a hub tool (`<team-slug>.<name>`), run under a per-team concurrency slot
+  (`hub_limits.slot`, 429 `hub_busy` over the cap); see [hub](../architecture/hub.md) for the run
+  itself. `router.routes.extend` wires `routers.hub`'s routes into the app alongside feedback and
+  media's.
 
   The credential ladder also supports a generic `platform_auth: anonymous` catalog fallback. A
   team tool or provider credential still wins. Without one, a verified free read-only endpoint can

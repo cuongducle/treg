@@ -74,8 +74,12 @@ Every command/subcommand carries a `description` + `help` on each argument + a c
 epilog (a `mk()` helper + `_ex()` + `RawDescriptionHelpFormatter`), so `treg <cmd> -h` is self-teaching.
 `treg --version` / `treg version` print `cli_version()` (package metadata); `treg update` (`cmd_update`)
 re-runs the server's `install.sh` to upgrade the CLI in place. A global **`--json`** flag (stripped in
-`main` like `--org`) makes the human-table commands (`org ls`, `agents ls`, `catalog` in all its forms)
-emit raw JSON instead — one stable contract for agents; commands that already print JSON are unaffected.
+`main` like `--org`; both last one `main()` call, reset on entry and exit) makes the human-table commands (`org ls`, `agents ls`, `catalog` in all its forms)
+emit raw JSON instead — one stable contract for agents. On `call` (not `--await`) it prints one
+compact envelope, `{"result": <body>, "_treg": {http_status, call_id, charged_micro | reserved_micro,
+replay?, async?, hint?}}` (`_call_envelope`; text as a string, binary as base64), and suppresses the
+charge, hint and failure-diagnostic stderr lines: a script that merged the streams once discarded
+every result it had paid for. Exit status is unchanged (1 on HTTP >= 400).
 **`TREG_CONFIG`** points the CLI at an alternate config file (CI/agents/tests; default
 `~/.treg/config.json`). `org use` validates the slug against `/orgs`, then gets that membership's
 active Default key before it saves either value. If that exchange fails, the previous team and token
@@ -148,7 +152,7 @@ every subparser and `treg call -h` would print the grouped front page instead of
 
 ```
 THE CATALOG — tools you don't have a key for     catalog · call · balance · topup
-YOUR OWN TOOLS — what your team already has      tool · skill · secret · connections
+YOUR OWN TOOLS — what your team already has      tool · skill · secret · connections · hub
 ON YOUR MACHINE — team credentials, locally      cli · with · serve
 BULK UPLOAD                                      scan · upload
 TEAM MANAGEMENT                                  audit · org · invites · accept · agents · admin
@@ -157,8 +161,7 @@ CONFIG                                           config · login · logout · on
 
 The order **is** the pitch: what you can do with no setup comes before what you have to register
 yourself, and `balance`/`topup` sit next to the thing that spends them rather than under team
-management. `test_help_is_grouped_and_hides_aliases` pins both the order and that `catalog` precedes
-`tool`, so a drift back to vault-first fails the suite.
+management.
 
 **Old → new.** Every one of these still parses and routes exactly as before — hidden, not removed:
 
@@ -409,6 +412,12 @@ Bare **`treg connections`** now lists (the subparser is `required=False` with a 
   the sites/properties/accounts it can act on), **`use <id> <resource_ref>`**
   (`POST /connections/{id}/resource` — select which one), **`rm <id>`** (`DELETE /connections/{id}` —
   disconnect). The old **`oauth`** namespace stays as a hidden alias of `connect` + `providers`.
+- **`hub`** (`cmd_hub_init`/`_run`/`_publish`/`_ls`/`_earnings`/`_price`/`_retire`/`_list`/`_unlist`/`_log`)
+  — publish a tool made of tools. See [hub](../architecture/hub.md).
+- **`whoami`** (`cmd_whoami`, visible but outside every `HELP_GROUPS` row) — the account, active team
+  + role, and server this CLI talks to (`GET /auth/me` + `/orgs`); added after an agent ran the
+  system `whoami` through `treg with` and printed the machine's user name, which reads like the
+  treg identity.
 - **`catalog [platform]`** (`cmd_catalog`) — the **endpoint** catalog: what you can CALL, as opposed to
   `connections providers`, which is what you can CONNECT. No arg → `GET /catalog/platforms`, one aligned row
   per platform (endpoints / verified / capabilities / the providers serving it), busiest first. With a

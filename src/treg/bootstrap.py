@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections.abc import Sequence
 from contextlib import asynccontextmanager, nullcontext
 from copy import copy
+from pathlib import Path
 from typing import Literal
 
 import httpx
@@ -98,6 +100,19 @@ _CONTROL_ROUTE_KEYS: frozenset[RouteKey] = frozenset({
     ('/media', ('POST',), 'host_media'),
     ('/m/{token}', ('GET',), 'serve_media'),
     ('/admin/feedback', ('GET',), 'admin_feedback'),
+    ('/hub/tools', ('POST',), 'publish_hub_tool'),
+    ('/hub/tools/mine', ('GET',), 'my_hub_tools'),
+    ('/hub/tools/{tool_id}', ('GET',), 'get_hub_tool'),
+    ('/hub/tools/{tool_id}', ('PUT',), 'update_hub_tool'),
+    ('/hub/run', ('POST',), 'run_hub_folder'),
+    ('/hub/tools/{tool_id}/earnings', ('GET',), 'hub_tool_earnings'),
+    ('/hub/tools/{tool_id}', ('DELETE',), 'retire_hub_tool'),
+    ('/hub/tools/{tool_id}', ('PATCH',), 'set_hub_tool_price'),
+    ('/hub/tools/{tool_id}/health', ('GET',), 'hub_tool_health'),
+    ('/hub/runs/{run_id}', ('GET',), 'hub_run'),
+    ('/app/runs/{run_id}', ('GET',), 'dashboard_run_page'),
+    ('/hub/{tool_id}', ('GET',), 'hub_page'),
+    ('/hub/{tool_id}.md', ('GET',), 'hub_page'),
     ('/auth/github', ('GET',), 'auth_github'),
     ('/auth/github/callback', ('GET',), 'auth_github_callback'),
     ('/auth/google', ('GET',), 'auth_google'),
@@ -115,7 +130,6 @@ _CONTROL_ROUTE_KEYS: frozenset[RouteKey] = frozenset({
     ('/auth/invite-signin', ('POST',), 'auth_invite_signin_confirm'),
     ('/', ('GET',), 'landing'),
     ('/app', ('GET',), 'dashboard'),
-    ('/app/legacy/assets/{path:path}', ('GET',), 'legacy_dashboard_asset'),
     ('/app/ui/assets/{name}', ('GET',), 'dashboard_asset'),
     ('/app/marketplace/{service}', ('GET',), 'dashboard_marketplace'),
     ('/app/skills/{name}', ('GET',), 'dashboard_skill_page'),
@@ -296,6 +310,10 @@ _CONTROL_ROUTE_KEYS: frozenset[RouteKey] = frozenset({
     ('/admin/orgs/{org_id}', ('GET',), 'admin_org_detail'),
     ('/admin/users', ('GET',), 'admin_users'),
     ('/admin/tools', ('GET',), 'admin_tools'),
+    ('/admin/hub/listings', ('GET',), 'admin_hub_listings'),
+    ('/admin/hub/listings/{tool_id}', ('POST',), 'admin_hub_listing_decide'),
+    ('/admin/hub/updates', ('GET',), 'admin_hub_updates'),
+    ('/admin/hub/updates/{tool_id}', ('POST',), 'admin_hub_update_decide'),
     ('/admin/calls', ('GET',), 'admin_calls'),
     ('/admin/errors', ('GET',), 'admin_errors'),
     ('/admin/health', ('GET',), 'admin_health'),
@@ -382,6 +400,22 @@ class _DayStatic(StaticFiles):
         return response
 
 
+class _MediaStatic(StaticFiles):
+    """Page media under stable, unversioned names (`/media/<page>/...`). With no Cache-Control a
+    browser applies a heuristic lifetime and never revalidates, so a page's edited script or
+    stylesheet would keep running old code against new HTML. Code and text therefore revalidate
+    on every use (`no-cache`; the ETag makes that a 304), and images, video and fonts, which a page
+    only ever swaps by renaming, keep a day's cache like the logos."""
+
+    _REVALIDATE = frozenset({".js", ".mjs", ".css", ".html", ".json", ".md", ".txt"})
+
+    def file_response(self, full_path, *args, **kwargs):
+        response = super().file_response(full_path, *args, **kwargs)
+        revalidate = Path(full_path).suffix.lower() in self._REVALIDATE
+        response.headers["Cache-Control"] = "no-cache" if revalidate else "public, max-age=86400"
+        return response
+
+
 def _route_key(route: APIRoute) -> RouteKey:
     return route.path, tuple(sorted(route.methods)), route.name
 
@@ -424,7 +458,7 @@ def _mount_static(app: FastAPI, api_module) -> None:
     if api_module._LOGO_DIR.exists():
         app.mount("/logos", _DayStatic(directory=str(api_module._LOGO_DIR)), name="logos")
     if api_module._MEDIA_DIR.exists():
-        app.mount("/media", StaticFiles(directory=str(api_module._MEDIA_DIR)), name="media")
+        app.mount("/media", _MediaStatic(directory=str(api_module._MEDIA_DIR)), name="media")
     if api_module._TOUR_DIR.exists():
         app.mount(
             "/dashboard-tour",
@@ -450,29 +484,55 @@ def _include_role_routes(app: FastAPI, api_module, role: AppRole) -> None:
     _include_routes(app, pending)
 
 
+def _openapi_operation_routes(routes: Sequence[BaseRoute], widened: set[int]) -> list[BaseRoute]:
+    """One schema view per documented operation, leaving the live routes untouched.
+
+    A widened GET route answers HEAD, but advertising it would duplicate every operation. A route
+    declaring several methods (the /call relay) is one FastAPI operation id for all of them, taken
+    from whichever method the set yields first; split it into per-method copies with their own ids.
+    """
+    result: list[BaseRoute] = []
+    for route in routes:
+        if not isinstance(route, APIRoute):
+            result.append(route)
+            continue
+        methods = {"GET"} if id(route) in widened else route.methods
+        if methods == route.methods and len(methods) == 1:
+            result.append(route)
+            continue
+        base_id = re.sub(r"\W", "_", f"{route.name}{route.path_format}")
+        for method in sorted(methods):
+            view = copy(route)
+            view.methods = {method}
+            if len(methods) > 1 and route.operation_id is None:
+                view.unique_id = f"{base_id}_{method.lower()}"
+            result.append(view)
+    return result
+
+
 def _install_head_and_openapi(app: FastAPI) -> None:
     """Answer HEAD wherever GET works without advertising duplicate OpenAPI operations."""
-    widened: list[APIRoute] = []
+    widened: set[int] = set()
     for route in app.routes:
         if isinstance(route, APIRoute) and route.methods == {"GET"}:
             route.methods = {"GET", "HEAD"}
-            widened.append(route)
+            widened.add(id(route))
 
     fastapi_openapi = app.openapi
 
-    def openapi_without_head():
+    def openapi_by_operation():
         if app.openapi_schema:
             return app.openapi_schema
-        for route in widened:
-            route.methods = {"GET"}
+        live = app.router.routes
+        # Synchronous and awaited nowhere, so no request is routed against the schema view.
+        app.router.routes = _openapi_operation_routes(live, widened)
         try:
             app.openapi_schema = fastapi_openapi()
         finally:
-            for route in widened:
-                route.methods = {"GET", "HEAD"}
+            app.router.routes = live
         return app.openapi_schema
 
-    app.openapi = openapi_without_head
+    app.openapi = openapi_by_operation
 
 
 def _route_manifest(routes: Sequence[BaseRoute]) -> list[str]:
@@ -531,12 +591,11 @@ def configure_archive_object_store(store) -> None:
 
 
 @asynccontextmanager
-async def _archive_object_store(app):
+async def archive_object_store(injected=None):
     from . import archive_bodies
     from .infra.object_store import open_r2
 
     enabled = archive_bodies.validate_configuration()
-    injected = getattr(app.state, "archive_object_store", None)
     opener = open_r2(get_settings()) if enabled and injected is None else nullcontext(injected)
     async with opener as store:
         configure_archive_object_store(store)
@@ -549,7 +608,7 @@ async def _archive_object_store(app):
 def _lifespan(role: AppRole):
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        async with _archive_object_store(app):
+        async with archive_object_store(getattr(app.state, "archive_object_store", None)):
             await verify_db()
             if kv.configured() and not await kv.store().ping():
                 # Not fatal: the store's tenants fail closed (infra/kv.py). Loud, because until it
